@@ -1,0 +1,61 @@
+# RAG Backend Dependencies
+# Core API & Transport
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic[email]>=2.5.0
+email-validator>=2.0.0
+pydantic-settings>=2.1.0
+httpx>=0.25.0
+python-multipart>=0.0.6
+
+# Auth, Identity, RBAC
+argon2-cffi>=23.1.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Database
+sqlmodel>=0.0.14
+sqlalchemy[asyncio]>=2.0.23
+aiosqlite>=0.19.0
+alembic>=1.12.0
+
+# Document Ingestion & Parsing
+aiofiles>=23.2.0
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+
+# Embeddings & NLP
+sentence-transformers>=2.2.0
+torch>=2.1.0
+numpy>=1.24.0
+
+# Vector Database (FAISS - works natively on Windows, no Docker needed)
+# Phase 2 will add Weaviate for production with Docker
+faiss-cpu>=1.7.0
+
+# Redis (for caching and task queue)
+redis>=5.0.0
+
+# Background Tasks (optional - for production)
+# celery[redis]>=5.3.0
+# dramatiq[redis]>=1.14.0
+
+# Monitoring & Logging
+prometheus-client>=0.19.0
+structlog>=23.2.0
+
+# Development
+python-dotenv>=1.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Optional: Graph Database (Neo4j) - uncomment for GraphRAG
+# neo4j>=5.14.0
+
+# Optional: OpenTelemetry (for distributed tracing)
+# opentelemetry-sdk>=1.21.0
+# opentelemetry-instrumentation-fastapi>=0.42b0
+# opentelemetry-exporter-otlp>=1.21.0

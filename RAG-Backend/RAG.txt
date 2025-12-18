@@ -1,0 +1,562 @@
+﻿1. API & Transport Layer
+Core responsibilities
+* Expose REST + WebSocket endpoints for:
+   * Auth: /auth/signup, /auth/login, /auth/logout, /auth/refresh
+   * User/profile: /users/me, /users/{id}, /users/preferences
+   * Documents: /documents/upload, /documents/{id}, /documents/search
+   * Chat/RAG: /chat, /chat/stream, /chat/history
+   * Admin/monitoring: /admin/metrics, /admin/logs, /admin/users​
+* Support streaming responses (Server-Sent Events or WebSockets) for token-by-token chat.​
+* Implement API versioning (/v1/...) and OpenAPI/Swagger docs.
+Non-functional
+* Rate limiting and per-user quotas.​
+* CORS config for your frontend.
+* Request/response validation and error normalization (standard error schema).
+________________
+
+
+2. Identity, Auth, and RBAC
+Authentication
+* User registration (email/password) with secure hashing (bcrypt/Argon2).
+* Login with JWT access + refresh tokens, secure rotation.​
+* Optional SSO/OAuth2 (Google/Microsoft) for enterprise.
+* Session revocation & logout (token blacklist or versioning).
+Authorization / RBAC
+* Role model: admin, power_user, viewer, ingestor etc., plus per-tenant roles.​
+* Enforce access at:
+   * Document level (who can read/write/upload/delete).
+   * Chunk level via metadata (access_level, department).
+   * Endpoint level (admin-only metrics, management APIs).​
+* Policy engine: either homegrown middleware or external like Cerbos/Oso.​
+User data storage
+* Tables/collections for:
+   * users (id, email, hashed_password, roles, metadata).
+   * sessions/tokens (for refresh, revocation).
+   * profiles (preferences, UI settings, allowed departments).
+   * api_keys for programmatic access.​
+________________
+
+
+3. RAG Core: Documents, Indexing, Retrieval
+Document ingestion
+* Endpoints:
+   * POST /documents/upload (PDF/DOCX/TXT)
+   * POST /documents/{id}/reindex (admin)
+* Pipeline:
+   * Parse (Docling/pdfplumber) → clean text → hybrid chunking with hierarchy.
+   * Optional NER + entity extraction into graph.
+   * Store:
+      * Raw files (object storage / filesystem).
+      * Structured text + metadata in DB.
+      * Embeddings in vector DB.
+      * Entities/relations in graph DB.​
+Indexing requirements
+* iRAG-style light indexing first:
+   * Immediately generate embeddings + basic metadata.
+   * Mark chunks with needs_graph_processing = true.
+* Background tasks for:
+   * Graph building.
+   * Community detection, summaries.
+   * Rebuilding indices when docs are updated.​
+Retrieval pipeline
+* Query pre-processing:
+   * Normalization + safety filters.
+   * Query expansion (multi-query RAG).
+   * Optional filters (time range, department, source constraints).​
+* Multi-phase retrieval:
+   * Phase 1: hybrid BM25 + vector search (RBAC filter applied).
+   * Phase 2: graph traversal / GraphRAG for entity-heavy queries.
+   * Phase 3: hierarchical / community summaries.
+   * Phase 4: cross-encoder reranking of candidates.​
+* Agent/router:
+   * Classify query (simple/complex/entity/doc) and choose retrieval mode.
+   * Fallback strategies if retrieval is weak (self-reflection, refine query).
+Chat & generation
+* Orchestrate:
+   * Build context window from ranked chunks + prior turns.
+   * Call local LLM with streaming; enforce temperature, max tokens, safety guardrails.
+   * Attach inline citations mapping to chunk sources.​
+* Maintain:
+   * conversations table (conversation id, user id, meta).
+   * messages table (role, content, sources, timings).
+________________
+
+
+4. Data & Storage Layer
+Relational / document DB
+* Core tables:
+   * users, roles, user_roles.
+   * documents, document_versions.
+   * chunks (id, doc_id, text, section, page, RBAC meta).
+   * conversations, messages.
+   * query_logs, feedback, metrics.​
+* Transactions around ingestion and permission updates.
+Vector & graph
+* Vector DB (Weaviate/Qdrant/Milvus) for embeddings + hybrid search.​
+* Graph DB (Neo4j/FalkorDB) for entities, relations, communities.​
+* Strong schema for RBAC fields: department, access_level, tenant_id.
+File/object storage
+* Raw uploads stored in versioned buckets or filesystem (with path in documents).
+* Optionally encrypted at rest for compliance.​
+________________
+
+
+5. Observability, Monitoring, and Admin
+Structured logging
+* JSON logs with:
+   * timestamp, request id, user id, route, status, latency, error type.​
+* Mask secrets/PII; configurable log levels (DEBUG for dev, INFO/ERROR in prod).
+Metrics
+* Expose Prometheus/OpenTelemetry metrics:
+   * RPS, latency (P50/P90/P99), error rate, token usage, cache hit rate.​
+   * RAG-specific: retrieval latency per phase, chunks returned, reranker scores.​
+* Dashboards (Grafana) for:
+   * System health.
+   * Per-user and per-tenant usage.
+   * LLM and vector DB performance.
+Tracing
+* OpenTelemetry traces through:
+   * Auth → Router → Retrieval → LLM.
+* Correlation IDs propagated across all logs and traces.​
+Admin APIs / console
+* GET /admin/metrics, /admin/users, /admin/documents, /admin/errors.
+* Actions:
+   * Force reindex, disable user, rotate API keys, purge cache.
+* Protected strictly by admin RBAC.​
+________________
+
+
+6. Cross-cutting Concerns & Hard Requirements
+* Security
+   * TLS everywhere, secure cookies for web.
+   * Input validation, prompt injection guards on user content.
+   * Per-tenant data isolation if multi-tenant.​
+* Performance
+   * Async I/O for all network calls.
+   * Batching to vector DB & LLM where possible.
+   * Caching: query-level, embedding-level, and metadata-level.​
+* Extensibility
+   * Clear module boundaries:
+      * auth, users, documents, retrieval, chat, monitoring.
+   * Config-driven choice of DBs/models (env or config file).
+   * Plug-in interface for LLM backends (llama.cpp now, others later).​
+________________
+
+
+7. Minimal Endpoint Checklist (for your unified RAG backend)
+* Auth & users
+   * POST /v1/auth/signup
+   * POST /v1/auth/login
+   * POST /v1/auth/logout
+   * POST /v1/auth/refresh
+   * GET /v1/users/me
+   * PATCH /v1/users/me
+* Documents
+   * POST /v1/documents/upload
+   * GET /v1/documents
+   * GET /v1/documents/{id}
+   * POST /v1/documents/{id}/reindex
+* Chat & RAG
+   * POST /v1/chat (non-streaming)
+   * GET /v1/chat/stream (WebSocket/SSE)
+   * GET /v1/chat/history
+   * POST /v1/chat/feedback
+* Monitoring & admin
+   * GET /v1/admin/metrics
+   * GET /v1/admin/logs
+   * GET /v1/admin/users
+   * GET /v1/admin/documents
+If you want, the next step can be a concrete module-level breakdown (e.g., FastAPI routers and service classes) tailored to your exact stack so you can scaffold this backend quickly.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The RAG backend you want is effectively a single consolidated application server that owns: auth, user data, document/RAG pipeline, chat, and monitoring. Below is a level‑wise “internal design report” of what must be implemented.
+________________
+
+
+1. Core Service Architecture
+The backend should be a modular monolith with clear domains, all behind one API layer. Every external request (auth, chat, upload, metrics) hits this API layer; internal modules talk via in‑process calls, not separate HTTP hops.​
+1.1 Modules / Bounded Contexts
+* auth: identity, tokens, RBAC, policy enforcement.
+* user: user profile, preferences, per‑user settings.
+* documents: upload, parsing, versioning, indexing orchestration.
+* retrieval: vector search, graph traversal, ranking, caching.
+* chat: conversation state, prompt construction, LLM calls.
+* monitoring: logs, metrics, traces, evaluation hooks.​
+* admin: system management, feature flags, offline jobs.
+Each module exposes an internal service API (Python classes/interfaces), wired into API routes. No module directly queries storage it doesn’t own; interactions go via services (e.g., ChatService asks RetrievalService for context, not the DB directly).​
+________________
+
+
+2. Auth, Identity, and RBAC Internals
+2.1 Identity Model
+* User entity:
+   * id, email, hashed_password, status, created_at.
+   * flags: is_admin, is_internal, etc.
+* Role & Permission:
+   * Role (e.g., admin, analyst, viewer).
+   * Permission (fine‑grained: upload_document, view_metrics, delete_document).
+   * user_roles and role_permissions mapping tables.​
+2.2 Authentication Flow
+* Passwords hashed with Argon2/bcrypt; all login attempts rate‑limited and logged.
+* Login:
+   * Verify credentials.
+   * Create signed JWT access token (short‑lived, includes sub, roles, tenant_id) and refresh token (stored in DB with status + expiry).
+   * Store device metadata (IP, UA) for audit.​
+* Token verification:
+   * Middleware decodes JWT, checks signature + expiry.
+   * Loads user & roles into request context (request.user, request.scopes).
+   * For refresh: verify against refresh_tokens table (revocation, rotation).
+2.3 Authorization & Enforcement
+* Central AuthorizationService controls:
+   * Endpoint‑level access (e.g., only admin can hit /admin/*).
+   * Resource‑level filters (documents/chunks must belong to user’s tenant and meet access_level policy).​
+* For documents and chunks, policies are encoded as:
+   * Row‑level predicates: (tenant_id = user.tenant_id) AND (access_level IN user.allowed_levels).
+   * Stored in both relational DB and vector/graph metadata so filters are pushed to those systems.​
+* Optional external policy engine (Cerbos/Oso) that evaluates (principal, resource, action, context) decisions for complex org structures.​
+________________
+
+
+3. Document & Indexing Internals
+3.1 Document Lifecycle
+1. Upload (POST /documents/upload):
+   * Streaming file handler writes raw file into object store or filesystem.
+   * Metadata row created in documents table:
+      * id, filename, owner_id, tenant_id, access_level, version, status='uploading'.
+2. Ingestion Job (background worker):
+   * DocumentIngestionService:
+      * Parse via Docling (extract text, layout, headings, tables).​
+      * Generate structured representation: sections, headings, page numbers.
+      * Produce “raw sections” and pass into ChunkingService.
+3. Chunking:
+   * Hybrid, structure‑aware:
+      * Keep heading hierarchy (Section 2 > 2.1 > 2.1.3).
+      * Respect semantic boundaries (sentences/paragraphs).
+   * Assign each chunk:
+      * chunk_id, document_id, text, page, section_path, parent_chunk_id, children_ids.
+   * Persist chunks into chunks table as “logical truth”, not yet embedded.
+4. Embedding & Light Indexing (iRAG style):​
+   * EmbeddingService batches chunks and calls sentence‑transformers to generate embeddings.
+   * Insert into vector DB with metadata:
+      * chunk_id, document_id, tenant_id, access_level, section, page, needs_graph_processing=true.
+   * Update documents.status='indexed_light'.
+5. Graph & Community Indexing (lazy/on‑demand):
+   * GraphIndexService runs either:
+      * Periodic background job (batch), or
+      * On first query that hits a chunk with needs_graph_processing=true.
+   * Steps:
+      * Run NER/entity extraction over chunk text.
+      * Upsert Entity nodes and MENTIONS_IN edges in Neo4j.
+      * Build community clusters (e.g., Leiden) and pre‑compute summary nodes.​
+   * Mark those chunks needs_graph_processing=false.
+3.2 Versioning & Consistency
+* Multiple versions per document:
+   * document_versions with version_id, document_id, source_uri, created_at, status.
+* On new version:
+   * Mark old chunks as superseded (still available for audit).
+   * New embeddings stored; RAG queries only search status='active'.
+* Background compaction job cleans old vectors and graph nodes if needed.
+________________
+
+
+4. Retrieval & Ranking Internals
+4.1 Query Pre‑processing
+The RetrievalService starts with a QueryContext object containing:
+* raw_query, user, tenant_id, filters (doc types, date range, tags).
+* Conversation history references (for follow‑up detection).
+Pipeline:
+1. Normalization & Safety:
+   * Lowercasing, trimming, punctuation normalization.
+   * Remove personally identifiable data if policy requires.​
+   * Detect malicious patterns (prompt injection markers, SQL in text).
+2. Query Classification:
+   * Lightweight classifier (small model or heuristic) determines:
+      * Type: FACT, ENTITY_GRAPH, COMPARISON, DOCUMENT_SUMMARY, TROUBLESHOOTING.
+      * Difficulty: SIMPLE, COMPLEX.
+   * This drives routing decisions later.​
+3. Query Expansion / Multi‑query:
+   * For non‑trivial queries:
+      * LLM generates 2–3 paraphrases and keyword expansions.
+   * All variants share the same QueryContext id to keep metrics aligned.​
+4.2 Multi‑Phase Retrieval
+Phase 1: Hybrid Vector + Keyword Search
+* For each query variant:
+   * Embed query using the same model as document embeddings.
+   * Call vector DB with hybrid search:
+      * alpha weight between BM25 and cosine similarity (e.g., 0.7 vector / 0.3 BM25).
+      * where filter includes tenant_id, access_level, optional tags & time range.​
+* Merge results:
+   * Deduplicate by (document_id, content_hash); keep highest score per chunk.
+   * Keep top N (e.g., 30) candidate chunks.
+Phase 2: GraphRAG / Entity‑Aware Retrieval
+* If classifier suggests entity/relationship or complex reasoning:
+   * Extract entities from Phase‑1 chunks (LLM or NER).
+   * Query graph DB:
+      * For each entity, retrieve its 1–2 hop neighborhood (related entities, summary nodes).
+      * Fetch associated chunk ids and then similar chunks from vector DB.​
+   * Merge with candidate list; tag graph‑derived candidates for logging.
+Phase 3: Community & Hierarchical Context
+* For clusters/communities tied to those entities:
+   * Pull pre‑computed summaries (high‑level narrative of that subgraph).
+   * Add them as pseudo‑chunks with low length but high summarization value.
+* Use parent/child relationships to:
+   * Expand highly relevant leaf chunks with siblings/parents (for context windows), while still scoring only the leafs in final ranking.​
+Phase 4: Cross‑Encoder Re‑ranking
+* Build pairs (query, candidate_text) for all candidates.
+* Cross‑encoder scores each; compute final score that can include:
+   * Vector score (phase 1).
+   * Graph centrality or community relevance.
+   * Recency decay (newer documents slightly upweighted).
+* Sort and select top K (e.g., 5–10) to feed to the LLM.​
+4.3 Self‑Reflection & Fallbacks
+* RelevanceGrader LLM is passed the query + chosen top chunks.
+* If graded below a threshold:
+   * Construct a refined query (“multi‑hop RAG” style).​
+   * Force retrieval in graph mode only and repeat ranking; mark query as “retry” in metrics.
+* If still low:
+   * Return “I don’t know” answer template and log as possible missing‑data case for ingestion roadmap.​
+________________
+
+
+5. Chat Orchestration & LLM Integration
+5.1 Conversation State
+* Tables:
+   * conversations: id, user_id, title, created_at, last_active, settings.
+   * messages: id, conversation_id, role, content, sources, token_count, latency_ms.
+* On new message:
+   * Detect if user is continuing the same conversation or starting a new one.
+   * Summarize old context into “memory messages” when token budget is exceeded (RAG‑with‑memory).​
+5.2 Prompt Construction
+PromptBuilder composes:
+* System prompt:
+   * Instructions on style, safety, and citation formatting.
+   * Policy: never reveal raw internal ids, never fabricate beyond context.​
+* Context block:
+   * Concatenation of top‑K chunks with headings, source ids, and minimal boilerplate:
+      * [source: compliance_manual.pdf | sec: 5.2.1 | page 23]\n<chunk text>.
+   * Include hierarchical explanations (“this is a summary of section 5”).
+* Conversation history:
+   * Past N turns (compressed) relevant to this query, as determined by semantic similarity over previous messages.​
+* User message:
+   * The normalized query plus any tool/filters.
+Prompt builder also:
+* Ensures token budget for context + output stays within LLM context.
+* Optionally segments response into multiple calls for very long answers.
+5.3 LLM Call & Streaming
+* LLMClient wraps llama.cpp HTTP API:
+   * Handles retries, timeouts, and circuit breaking.
+   * Supports streaming: as chunks arrive, converts them into WebSocket “token” events for the frontend.
+* As tokens stream:
+   * ChatService incrementally builds the response string and can:
+      * Apply simple post‑processing (strip trailing spaces, enforce markdown fences).
+      * Abort if user cancels via WebSocket message.
+* At completion:
+   * Extract citation markers (e.g., [source: X]) and resolve to concrete chunk metadata for the UI.
+________________
+
+
+6. Monitoring, Evaluation, and Ops
+6.1 Logging
+* Structured JSON logs at every critical stage:
+   * auth (without sensitive data), ingestion, retrieval_phase1..4, llm_call, errors.
+* Mandatory fields:
+   * timestamp, request_id, user_id, tenant_id, route, phase, latency_ms, status_code.​
+* Adhere to best practices:
+   * No PII in logs.
+   * Redact prompts/content if compliance requires, or sample anonymized traces for debugging.​
+6.2 Metrics & Evaluation
+* Prometheus/OpenTelemetry metrics:
+   * QPS, latency by endpoint and phase.
+   * Retrieval quality signals: mean top‑K cross‑encoder score, retry rate, “no answer” rate.​
+   * Per‑user and per‑tenant token consumption.
+* Offline evaluation suite:
+   * Gold‑label queries with relevant chunks; compute recall@K, MRR.
+   * RAG‑specific metrics: answer faithfulness vs. context, hallucination rate.​
+6.3 Admin & Maintenance
+* Admin console (API + maybe separate UI) to:
+   * Inspect documents, re‑trigger ingestion/indexing.
+   * View query logs per user/tenant.
+   * Configure throttling and feature flags (e.g., enable GraphRAG, enable multi‑query).​
+* Background tasks:
+   * Clean stale query cache entries.
+   * Compress old conversations (summarization).
+   * Re‑run evaluation suites as part of CI/CD before deploying retrieval/model changes.​
+________________
+
+
+7. End‑to‑End Request Lifecycle (What Happens Internally)
+1. Auth request hits /auth/login:
+   * AuthController → AuthService verifies credentials, issues tokens, logs event.
+2. Chat request hits /chat/stream with bearer token:
+   * Middleware authenticates & loads user, checks RBAC for use_chat.
+   * ChatService:
+      * Creates/fetches conversation.
+      * Builds QueryContext and invokes RetrievalService.
+3. RetrievalService:
+   * Runs normalization, classification, query expansion.
+   * Executes phases 1–4, using VectorStoreClient, GraphStoreClient.
+   * Grades relevance; retries if necessary.
+   * Returns ranked chunks + metadata.
+4. ChatService:
+   * Calls PromptBuilder to assemble prompt from chunks + history.
+   * Invokes LLMClient for streaming generation.
+   * Emits tokens via WebSocket, then citations object.
+   * Persists messages, query_logs, metrics.
+5. MonitoringService:
+   * Exposes summary metrics for dashboards.
+   * Alerts on error spikes, latency anomalies, low‑relevance spikes.​
+This is the level of internal detail you’d target in a design doc before implementation. If you want next, a concrete class/module diagram (e.g., Python package layout with service interfaces) can be sketched to match your preferred stack (FastAPI + Weaviate + Neo4j + llama.cpp).
+
+
+
+
+
+
+
+
+
+
+
+
+Core API & Transport
+* HTTP API framework: FastAPI (fastapi)
+* ASGI server: Uvicorn (uvicorn[standard])
+* WebSockets: FastAPI built‑in + python-socketio (python-socketio)
+* Request validation / schemas: Pydantic v2 (pydantic)
+* Async HTTP client (to LLM/vector DB): httpx (httpx)
+________________
+
+
+Auth, Identity, RBAC
+* Password hashing: passlib[bcrypt] or argon2-cffi (passlib, argon2-cffi)​
+* JWT tokens: python-jose or PyJWT (python-jose[cryptography], pyjwt)
+* OAuth2 flows: fastapi.security or Authlib (authlib)
+* RBAC / policy engine (optional): Oso (oso) or Cerbos (via REST SDK)​
+* Rate limiting: slowapi (slowapi) or limits
+________________
+
+
+Data & Persistence
+* ORM / DB access: SQLModel or SQLAlchemy (sqlmodel, sqlalchemy)
+* Relational DB drivers:
+   * Postgres: asyncpg / psycopg[binary]
+   * SQLite: aiosqlite / built‑in sqlite3
+* Migrations: Alembic (alembic)
+* Caching & queues: Redis (redis[hiredis])
+________________
+
+
+Document Ingestion & Chunking
+* PDF/Office parsing:
+   * Docling (docling, docling-core)​
+   * Supplement: pdfplumber, python-docx, python-pptx
+* HTML/Markdown handling: beautifulsoup4, markdownify, html2text
+* Text normalization / cleaning: regex, ftfy, unidecode
+________________
+
+
+Embeddings & NLP
+* Sentence embeddings: sentence-transformers (sentence-transformers, torch)​
+* Cross‑encoder reranker: also via sentence-transformers
+* Tokenization / text splitting (if not only Docling):
+   * tiktoken (OpenAI tokenizer)
+   * nltk or spacy for sentence splitting
+* NER / entity extraction:
+   * spaCy (spacy, en_core_web_trf)
+   * Or LLM‑based via transformers or litellm
+________________
+
+
+Vector Store & Graph Store
+* Vector DB clients:
+   * Weaviate: weaviate-client​
+   * (Alternatives) Qdrant: qdrant-client, Milvus: pymilvus
+* Graph DB (Neo4j): neo4j-python-driver (neo4j)​
+* Graph analytics (if done client‑side): networkx (networkx)
+________________
+
+
+Retrieval & Ranking Logic
+* Hybrid search orchestration: implemented in your code using:
+   * weaviate-client hybrid queries (BM25 + vector)
+   * sqlalchemy filters for metadata​
+* Cross‑encoder reranking: sentence-transformers CrossEncoder models
+* Query classification / router:
+   * Small classifier via scikit-learn (scikit-learn)
+   * Or lightweight LLM calls through litellm (litellm) or openai‑compatible client
+________________
+
+
+LLM Integration
+* Local LLM client for llama.cpp:
+   * Use generic OpenAI‑compatible client: openai or litellm pointing at llama.cpp server
+   * Or plain httpx for manual REST calls
+* Prompt templating: jinja2 (optional)
+________________
+
+
+Background Jobs & iRAG
+* Task queue / workers:
+   * Celery (celery[redis]) or Dramatiq (dramatiq[redis])
+* Scheduling periodic jobs: APScheduler (apscheduler)
+________________
+
+
+Chat & Session Management
+* Conversation storage: your ORM + DB (sqlmodel/sqlalchemy)
+* In‑memory session cache: Redis via redis.asyncio
+* WebSocket management: FastAPI + python-socketio (server & client)
+________________
+
+
+Monitoring, Logging, Evaluation
+* Structured logging: structlog or standard logging with JSON formatter (python-json-logger)​
+* Metrics: prometheus_client (prometheus-client)
+* Tracing: OpenTelemetry (opentelemetry-sdk, opentelemetry-instrumentation-fastapi, opentelemetry-exporter-otlp)​
+* Log shipping: opentelemetry-instrumentation-logging or send logs to Loki/ELK via exporters
+* RAG eval: ragas (ragas), Galileo, or deepeval (open‑source evaluation frameworks)​
+________________
+
+
+Security & Hardening
+* Input sanitization: bleach for HTML, custom regex filters
+* TLS termination: at reverse proxy (Nginx/Traefik), not Python; but cert renewal via certbot
+* Secrets management: python-dotenv for dev, then cloud KMS or HashiCorp Vault SDK in prod​
