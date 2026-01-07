@@ -27,6 +27,7 @@ venv/
 ENV/
 env/
 .venv/
+myenv/
 
 # PyInstaller
 *.manifest
@@ -98,6 +99,7 @@ yarn-error.log*
 ehthumbs.db
 Thumbs.db
 desktop.ini
+*.pkl
 
 # =========================
 # Database
@@ -129,7 +131,9 @@ logs/
 uploads/
 data/uploads/
 *.pdf
-faiss_index/
+faiss_inde
+vector_store/
+weaviate_data/x/
 chroma_db/
 
 # =========================
