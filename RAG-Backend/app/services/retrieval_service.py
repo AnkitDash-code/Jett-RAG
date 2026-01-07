@@ -470,11 +470,33 @@ class RetrievalService:
     ) -> List[RetrievedChunk]:
         """
         Rerank chunks using cross-encoder.
-        TODO: Implement actual cross-encoder reranking.
         """
-        # Placeholder: just sort by existing score
-        # In production, use sentence-transformers CrossEncoder
-        return sorted(chunks, key=lambda c: c.final_score, reverse=True)
+        if not settings.ENABLE_CROSS_ENCODER or not chunks:
+            # Just sort by existing score if cross-encoder disabled
+            return sorted(chunks, key=lambda c: c.final_score, reverse=True)
+        
+        try:
+            from app.services.reranker_service import get_reranker
+            
+            reranker = get_reranker()
+            texts = [c.chunk.text for c in chunks]
+            
+            reranked = reranker.rerank(
+                query=query,
+                texts=texts,
+                top_k=len(chunks)  # Keep all, just reorder
+            )
+            
+            # Update scores based on reranking
+            for i, (original_idx, score) in enumerate(reranked):
+                chunks[original_idx].rerank_score = score
+                chunks[original_idx].final_score = score
+            
+            return sorted(chunks, key=lambda c: c.final_score, reverse=True)
+            
+        except Exception as e:
+            logger.warning(f"Reranking failed, using original scores: {e}")
+            return sorted(chunks, key=lambda c: c.final_score, reverse=True)
     
     def _grade_relevance(self, top_score: float) -> str:
         """Grade the relevance of retrieval results."""

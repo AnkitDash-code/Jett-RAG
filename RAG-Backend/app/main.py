@@ -14,6 +14,7 @@ from app.database import init_db, async_session_maker
 from app.api.v1 import api_router
 from app.middleware.logging import RequestLoggingMiddleware
 from app.middleware.error_handler import global_exception_handler
+from app.middleware.rate_limit import setup_rate_limiting
 
 # Configure logging
 logging.basicConfig(
@@ -109,6 +110,9 @@ def create_application() -> FastAPI:
     
     # Global exception handler
     app.add_exception_handler(Exception, global_exception_handler)
+    
+    # Setup rate limiting
+    setup_rate_limiting(app)
     
     # Mount API router
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)

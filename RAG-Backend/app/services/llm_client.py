@@ -10,6 +10,8 @@ from typing import Optional, AsyncIterator, Dict, Any
 import httpx
 
 from app.config import settings
+from app.services.token_counter import get_token_counter
+from app.services.metrics_service import get_metrics_service
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,8 @@ class LLMClient:
         self.model = model
         self.timeout = timeout
         self._client: Optional[httpx.AsyncClient] = None
+        self._token_counter = get_token_counter()
+        self._metrics = get_metrics_service()
     
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
@@ -64,7 +68,7 @@ class LLMClient:
             stop: Stop sequences
         
         Returns:
-            Dict with 'content', 'tokens_used', 'latency_ms'
+            Dict with 'content', 'tokens_used', 'prompt_tokens', 'completion_tokens', 'latency_ms'
         """
         client = await self._get_client()
         
@@ -72,6 +76,9 @@ class LLMClient:
         
         # Extract query and context from messages for LLM-Backend format
         query, context = self._messages_to_query_context(messages)
+        
+        # Count prompt tokens
+        prompt_tokens = self._token_counter.count_messages(messages)
         
         try:
             response = await client.post(
@@ -88,16 +95,30 @@ class LLMClient:
             # LLM-Backend returns {"response": "..."}
             content = data.get("response", "")
             
+            # Count completion tokens
+            completion_tokens = self._token_counter.count(content)
+            
             latency_ms = int((time.perf_counter() - start_time) * 1000)
+            latency_seconds = latency_ms / 1000.0
+            
+            # Record metrics
+            self._metrics.record_llm_request(
+                llm_type="main",
+                status="success",
+                latency=latency_seconds
+            )
             
             return {
                 "content": content,
-                "tokens_used": 0,  # LLM-Backend doesn't return token count
+                "tokens_used": prompt_tokens + completion_tokens,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
                 "latency_ms": latency_ms,
             }
             
         except httpx.HTTPError as e:
             logger.error(f"LLM API error: {e}")
+            self._metrics.record_llm_request(llm_type="main", status="error")
             raise RuntimeError(f"LLM generation failed: {e}")
     
     def _messages_to_query_context(

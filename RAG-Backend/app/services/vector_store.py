@@ -27,6 +27,7 @@ class FAISSVectorStore:
     _instance = None
     _index = None
     _metadata: Dict[str, Dict[str, Any]] = {}
+    _embeddings: Dict[str, List[float]] = {}  # chunk_id -> embedding (for rebuild)
     _id_to_idx: Dict[str, int] = {}  # chunk_id -> FAISS index position
     _idx_to_id: Dict[int, str] = {}  # FAISS index position -> chunk_id
     _initialized = False
@@ -62,6 +63,10 @@ class FAISSVectorStore:
     def _mappings_path(self) -> Path:
         return self._persist_dir / "mappings.pkl"
     
+    @property
+    def _embeddings_path(self) -> Path:
+        return self._persist_dir / "embeddings.pkl"
+    
     def _load(self):
         """Load index and metadata from disk."""
         try:
@@ -84,6 +89,11 @@ class FAISSVectorStore:
                     mappings = pickle.load(f)
                     self._id_to_idx = mappings.get("id_to_idx", {})
                     self._idx_to_id = mappings.get("idx_to_id", {})
+            
+            # Load embeddings for rebuild capability
+            if self._embeddings_path.exists():
+                with open(self._embeddings_path, 'rb') as f:
+                    self._embeddings = pickle.load(f)
                     
         except ImportError:
             logger.error("faiss-cpu not installed. Run: pip install faiss-cpu")
@@ -94,6 +104,7 @@ class FAISSVectorStore:
             import faiss
             self._index = faiss.IndexFlatIP(settings.EMBEDDING_DIMENSION)
             self._metadata = {}
+            self._embeddings = {}
             self._id_to_idx = {}
             self._idx_to_id = {}
     
@@ -112,6 +123,10 @@ class FAISSVectorStore:
                     "id_to_idx": self._id_to_idx,
                     "idx_to_id": self._idx_to_id,
                 }, f)
+            
+            # Save embeddings for rebuild capability
+            with open(self._embeddings_path, 'wb') as f:
+                pickle.dump(self._embeddings, f)
                 
         except Exception as e:
             logger.error(f"Error saving FAISS index: {e}")
@@ -150,6 +165,9 @@ class FAISSVectorStore:
             if chunk_id in self._id_to_idx:
                 logger.debug(f"Chunk {chunk_id} already indexed, skipping")
                 return True
+            
+            # Store embedding for rebuild capability
+            self._embeddings[chunk_id] = embedding
             
             # Normalize and add to index
             vector = np.array([embedding], dtype=np.float32)
@@ -201,6 +219,8 @@ class FAISSVectorStore:
                     continue  # Skip already indexed
                 new_chunks.append(chunk)
                 vectors.append(chunk["embedding"])
+                # Store embedding for rebuild
+                self._embeddings[chunk_id] = chunk["embedding"]
             
             if not vectors:
                 return 0
@@ -325,7 +345,7 @@ class FAISSVectorStore:
     async def delete_by_document(self, document_id: str) -> int:
         """
         Delete all chunks for a document.
-        Note: FAISS doesn't support deletion, so we rebuild the index.
+        Rebuilds the FAISS index from persisted embeddings.
         """
         if self._index is None:
             return 0
@@ -340,36 +360,63 @@ class FAISSVectorStore:
             if not to_delete:
                 return 0
             
-            # Remove from metadata
+            # Remove from metadata and embeddings
             for cid in to_delete:
-                del self._metadata[cid]
+                self._metadata.pop(cid, None)
+                self._embeddings.pop(cid, None)
             
-            # Rebuild index without deleted chunks
-            import faiss
-            
-            remaining_ids = list(self._metadata.keys())
-            if remaining_ids:
-                # Get remaining vectors (need to reconstruct from current index)
-                # Since IndexFlatIP doesn't support reconstruct, we need to re-add
-                # For now, we'll just clear mappings for deleted items
-                # A full rebuild would require storing vectors separately
-                pass
-            
-            # Update mappings (mark as deleted)
-            for cid in to_delete:
-                if cid in self._id_to_idx:
-                    idx = self._id_to_idx[cid]
-                    del self._id_to_idx[cid]
-                    if idx in self._idx_to_id:
-                        del self._idx_to_id[idx]
+            # Rebuild FAISS index from remaining embeddings
+            await self._rebuild_index()
             
             self._save()
-            logger.info(f"Marked {len(to_delete)} chunks as deleted for document {document_id}")
+            logger.info(f"Deleted {len(to_delete)} chunks for document {document_id}")
             return len(to_delete)
             
         except Exception as e:
             logger.error(f"Error deleting chunks for document {document_id}: {e}")
             return 0
+    
+    async def _rebuild_index(self):
+        """Rebuild FAISS index from stored embeddings."""
+        import faiss
+        
+        # Clear current index
+        self._index = faiss.IndexFlatIP(settings.EMBEDDING_DIMENSION)
+        self._id_to_idx = {}
+        self._idx_to_id = {}
+        
+        if not self._embeddings:
+            logger.info("No embeddings to rebuild, index is now empty")
+            return
+        
+        # Get remaining chunk IDs (those still in metadata)
+        remaining_ids = [cid for cid in self._embeddings.keys() if cid in self._metadata]
+        
+        if not remaining_ids:
+            # Clean up orphaned embeddings
+            self._embeddings = {}
+            return
+        
+        # Build vectors array
+        vectors = []
+        for cid in remaining_ids:
+            vectors.append(self._embeddings[cid])
+        
+        vectors = np.array(vectors, dtype=np.float32)
+        vectors = self._normalize(vectors)
+        
+        # Add to index
+        self._index.add(vectors)
+        
+        # Rebuild mappings
+        for i, cid in enumerate(remaining_ids):
+            self._id_to_idx[cid] = i
+            self._idx_to_id[i] = cid
+        
+        # Remove orphaned embeddings
+        self._embeddings = {cid: self._embeddings[cid] for cid in remaining_ids}
+        
+        logger.info(f"Rebuilt FAISS index with {len(remaining_ids)} vectors")
     
     async def get_stats(self) -> Dict[str, Any]:
         """Get index statistics."""

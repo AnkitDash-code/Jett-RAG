@@ -30,10 +30,19 @@ torch>=2.1.0
 numpy>=1.24.0
 
 # Vector Database (FAISS - works natively on Windows, no Docker needed)
-# Phase 2 will add Weaviate for production with Docker
 faiss-cpu>=1.7.0
 
-# Redis (for caching and task queue)
+# Hybrid Search & Reranking (Phase 2)
+rank-bm25>=0.2.2
+tiktoken>=0.5.0
+
+# Rate Limiting
+slowapi>=0.1.9
+
+# Graph (pure Python - no Neo4j needed)
+networkx>=3.2.0
+
+# Redis (optional - for caching and task queue)
 redis>=5.0.0
 
 # Background Tasks (optional - for production)

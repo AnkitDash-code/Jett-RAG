@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 1024
     LLM_TEMPERATURE: float = 0.1
     
+    # Utility LLM (uses same API as main LLM but with different parameters)
+    # Same endpoint, but can be configured for lighter model if available
+    UTILITY_LLM_URL: str = "http://localhost:8080"  # Same as main LLM API
+    UTILITY_LLM_MODEL: str = "mistral-7b-instruct"  # Same model, different params
+    UTILITY_LLM_MAX_TOKENS: int = 256  # Shorter responses for utility tasks
+    UTILITY_LLM_TEMPERATURE: float = 0.2  # Lower temp for deterministic outputs
+    UTILITY_LLM_ENABLED: bool = True  # Enable for Phase 3 query intelligence
+    
     # Vector Database (FAISS - current implementation)
     # Phase 2: Weaviate with Docker for production hybrid search
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
@@ -68,6 +76,26 @@ class Settings(BaseSettings):
     RERANK_TOP_K: int = 5
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
+    
+    # Hybrid Search Settings
+    HYBRID_ALPHA: float = 0.5  # Weight for vector vs BM25 (1.0 = pure vector, 0.0 = pure BM25)
+    ENABLE_HYBRID_SEARCH: bool = True
+    ENABLE_CROSS_ENCODER: bool = True
+    CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANK_CANDIDATES: int = 30  # Number of candidates to rerank
+    
+    # Query Expansion
+    ENABLE_QUERY_EXPANSION: bool = True
+    QUERY_EXPANSION_COUNT: int = 3
+    
+    # Relevance Threshold
+    RELEVANCE_THRESHOLD: float = 0.3
+    
+    # Rate Limiting
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_CHAT: str = "30/minute"
+    RATE_LIMIT_UPLOAD: str = "10/minute"
+    RATE_LIMIT_DEFAULT: str = "100/minute"
     
     # Monitoring
     ENABLE_METRICS: bool = True
