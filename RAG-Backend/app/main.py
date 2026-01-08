@@ -38,7 +38,25 @@ async def lifespan(app: FastAPI):
     # Create default admin user if not exists
     await create_default_admin()
     
+    # Start background task queue (Phase 5)
+    from app.services.task_queue import setup_task_queue_lifespan, teardown_task_queue_lifespan
+    await setup_task_queue_lifespan()
+    logger.info("Task queue started")
+    
+    # Start maintenance scheduler (Phase 5)
+    from app.services.maintenance_jobs import setup_maintenance_scheduler, teardown_maintenance_scheduler
+    await setup_maintenance_scheduler()
+    logger.info("Maintenance scheduler started")
+    
     yield
+    
+    # Shutdown maintenance scheduler
+    await teardown_maintenance_scheduler()
+    logger.info("Maintenance scheduler stopped")
+    
+    # Shutdown task queue
+    await teardown_task_queue_lifespan()
+    logger.info("Task queue stopped")
     
     # Shutdown - dispose engine to close all connections immediately
     logger.info("Shutting down application...")

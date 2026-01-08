@@ -7,6 +7,11 @@ Integrates Phase 3 services:
 - Relevance grading (self-reflection)
 - Conversation context
 
+Phase 4 additions:
+- Graph traversal for entity-aware retrieval
+- Community context injection
+- Hybrid scoring (vector + rerank + graph)
+
 This module provides an enhanced retrieve function that wraps the base RetrievalService.
 """
 import logging
@@ -23,6 +28,33 @@ from app.services.query_expansion_service import get_query_expansion_service
 from app.services.query_classification_service import get_query_classification_service, QueryType
 from app.services.relevance_grader import get_relevance_grader
 from app.services.conversation_context_service import get_conversation_context_service
+
+# Phase 4: GraphRAG integration (conditional import)
+_graph_traversal_service = None
+def _get_graph_traversal_service():
+    """Lazy import for graph traversal service."""
+    global _graph_traversal_service
+    if _graph_traversal_service is None and getattr(settings, 'ENABLE_GRAPH_RAG', False):
+        try:
+            from app.services.graph_traversal_service import get_graph_traversal_service
+            _graph_traversal_service = get_graph_traversal_service()
+        except ImportError:
+            logger.warning("GraphRAG not available - graph_traversal_service not found")
+            _graph_traversal_service = False
+    return _graph_traversal_service if _graph_traversal_service else None
+
+# Phase 5: Hierarchical retrieval integration (conditional import)
+_hierarchical_service = None
+def _get_hierarchical_service(db: AsyncSession):
+    """Lazy import for hierarchical retrieval service."""
+    if not getattr(settings, 'ENABLE_HIERARCHICAL_CHUNKING', False):
+        return None
+    try:
+        from app.services.hierarchical_retrieval_service import get_hierarchical_retrieval_service
+        return get_hierarchical_retrieval_service(db)
+    except ImportError:
+        logger.warning("Hierarchical retrieval not available")
+        return None
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +77,16 @@ class EnhancedRetrievalResult:
     # Conversation context
     conversation_context: str = ""
     
+    # Graph retrieval (Phase 4)
+    graph_context: str = ""
+    graph_entities: List[str] = field(default_factory=list)
+    graph_communities: List[Dict[str, Any]] = field(default_factory=list)
+    graph_traversal_ms: int = 0
+    
+    # Hierarchical retrieval (Phase 5)
+    hierarchy_context: List[Dict[str, Any]] = field(default_factory=list)
+    hierarchy_expansion_ms: int = 0
+    
     # Timing
     classification_ms: int = 0
     expansion_ms: int = 0
@@ -64,7 +106,9 @@ class EnhancedRetrievalResult:
             self.classification_ms +
             self.expansion_ms +
             self.grading_ms +
-            self.context_ms
+            self.context_ms +
+            self.graph_traversal_ms +
+            self.hierarchy_expansion_ms
         )
 
 
@@ -218,6 +262,88 @@ class EnhancedRetrievalService:
             )
         
         result.base_result = base_result
+        
+        # ====================================================================
+        # Step 4.5: Graph Traversal (Phase 4 - GraphRAG)
+        # ====================================================================
+        # Enhance retrieval with graph-based entity connections and community context
+        t0 = time.perf_counter()
+        
+        graph_service = _get_graph_traversal_service()
+        if graph_service and routing.get("use_graph", False):
+            try:
+                graph_result = await graph_service.retrieve(
+                    query=query,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    max_hops=getattr(settings, 'GRAPH_MAX_HOPS', 1),
+                    top_k=top_k,
+                )
+                
+                # Merge graph chunks with vector results
+                if graph_result.chunks:
+                    merged_result = graph_service.merge_with_vector_results(
+                        vector_result=base_result,
+                        graph_result=graph_result,
+                        vector_weight=1.0 - getattr(settings, 'GRAPH_SCORE_WEIGHT', 0.3),
+                        graph_weight=getattr(settings, 'GRAPH_SCORE_WEIGHT', 0.3),
+                    )
+                    result.base_result = merged_result
+                    
+                    # Store graph metadata
+                    result.graph_entities = graph_result.entities
+                    result.graph_communities = [
+                        {"name": c.community_name, "summary": c.summary}
+                        for c in graph_result.community_contexts
+                    ]
+                    
+                # Build context string with community summaries
+                if graph_result.community_contexts:
+                    result.graph_context = graph_service.build_context_with_communities(
+                        graph_result
+                    )
+                    
+                logger.debug(
+                    f"GraphRAG: {len(graph_result.chunks)} graph chunks, "
+                    f"{len(graph_result.entities)} entities, "
+                    f"{len(graph_result.community_contexts)} communities"
+                )
+            except Exception as e:
+                logger.warning(f"Graph traversal failed, continuing with vector-only: {e}")
+        
+        result.graph_traversal_ms = int((time.perf_counter() - t0) * 1000)
+        
+        # ====================================================================
+        # Step 4.6: Hierarchical Expansion (Phase 5)
+        # ====================================================================
+        # Expand retrieval with parent summaries for broader context
+        t0 = time.perf_counter()
+        
+        hierarchical_service = _get_hierarchical_service(self.db)
+        if hierarchical_service and result.base_result and result.base_result.chunks:
+            try:
+                chunk_ids = [c.chunk.id for c in result.base_result.chunks]
+                
+                # Expand to parents for broader context
+                expanded_chunks = await hierarchical_service.expand_retrieval_results(
+                    chunk_ids=chunk_ids,
+                    strategy="parent",  # Add parent summaries
+                    max_chunks=top_k + 5,  # Allow a few extra for context
+                )
+                
+                # Add parent context to result metadata
+                parent_chunks = [c for c in expanded_chunks if c.hierarchy_level > 0]
+                if parent_chunks:
+                    result.hierarchy_context = [
+                        {"level": c.hierarchy_level, "text": c.text[:200]}
+                        for c in parent_chunks
+                    ]
+                    logger.debug(f"Hierarchical: added {len(parent_chunks)} parent summaries")
+                    
+            except Exception as e:
+                logger.warning(f"Hierarchical expansion failed: {e}")
+        
+        result.hierarchy_expansion_ms = int((time.perf_counter() - t0) * 1000)
         
         # ====================================================================
         # Step 5: Relevance Grading

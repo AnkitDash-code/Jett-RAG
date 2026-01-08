@@ -259,3 +259,328 @@ async def clear_cache(
     # TODO: Clear query cache
     
     return {"message": "Cache cleared successfully"}
+
+
+# =============================================================================
+# Graph Admin Endpoints (Phase 4 - GraphRAG)
+# =============================================================================
+
+@router.get("/graph/stats")
+async def get_graph_stats(
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get knowledge graph statistics.
+    
+    Returns:
+    - Node/edge counts
+    - Community count
+    - Pending chunks for processing
+    - Graph density and metrics
+    """
+    from app.services.graph_store import get_graph_store_service
+    from app.services.graph_index_service import get_graph_index_service
+    
+    graph_store = get_graph_store_service(db)
+    index_service = get_graph_index_service(db)
+    
+    stats = await graph_store.get_stats()
+    queue_stats = await index_service.get_task_queue_stats()
+    
+    return {
+        "graph": stats.to_dict(),
+        "processing_queue": queue_stats,
+        "config": {
+            "enabled": True,
+            "max_hops": 1,
+            "cache_ttl_seconds": 300,
+            "processing_workers": 2,
+        }
+    }
+
+
+@router.post("/graph/reindex")
+async def trigger_graph_reindex(
+    background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Force reindex all documents"),
+    document_ids: Optional[list[str]] = Query(None, description="Specific document IDs to reindex"),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Trigger graph reindexing.
+    
+    This marks chunks for reprocessing and optionally forces
+    immediate reindexing of the knowledge graph.
+    """
+    from app.services.graph_index_service import get_graph_index_service
+    
+    index_service = get_graph_index_service(db)
+    
+    # Convert document_ids to UUIDs if provided
+    doc_uuids = None
+    if document_ids:
+        doc_uuids = [uuid.UUID(d) for d in document_ids]
+    
+    result = await index_service.force_reindex(document_ids=doc_uuids)
+    
+    return {
+        "status": "reindex_queued",
+        "pending_chunks": result["pending_chunks"],
+        "force": force,
+        "document_ids": document_ids,
+    }
+
+
+@router.get("/graph/communities")
+async def list_communities(
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List all communities with summaries.
+    """
+    from sqlalchemy import select, func
+    from app.models.graph import Community, CommunityContext, CommunityMembership
+    
+    # Get communities with counts
+    result = await db.execute(
+        select(Community)
+        .order_by(Community.node_count.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    communities = list(result.scalars().all())
+    
+    # Get total count
+    count_result = await db.execute(select(func.count(Community.id)))
+    total = count_result.scalar() or 0
+    
+    # Get contexts for each community
+    community_data = []
+    for comm in communities:
+        context_result = await db.execute(
+            select(CommunityContext).where(
+                CommunityContext.community_id == comm.id
+            )
+        )
+        context = context_result.scalar_one_or_none()
+        
+        community_data.append({
+            "id": str(comm.id),
+            "name": comm.name,
+            "algorithm": comm.algorithm,
+            "node_count": comm.node_count,
+            "edge_count": comm.edge_count,
+            "created_at": comm.created_at.isoformat(),
+            "summary": context.summary_text if context else None,
+            "key_entities": context.key_entities.split(",") if context and context.key_entities else [],
+        })
+    
+    return {
+        "communities": community_data,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/graph/permissions/{resource_type}/{resource_id}")
+async def get_permission_tree(
+    resource_type: str,
+    resource_id: str,
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get permission tree for a resource.
+    
+    Shows who has access and why (direct vs inherited permissions).
+    """
+    from app.services.permission_inheritance_service import (
+        get_permission_inheritance_service,
+        ResourceType
+    )
+    
+    # Map resource type string to enum
+    type_map = {
+        "folder": ResourceType.FOLDER,
+        "document": ResourceType.DOCUMENT,
+        "chunk": ResourceType.CHUNK,
+        "entity": ResourceType.ENTITY,
+    }
+    
+    if resource_type not in type_map:
+        return {"error": f"Invalid resource type. Must be one of: {list(type_map.keys())}"}
+    
+    perm_service = get_permission_inheritance_service(db)
+    tree = await perm_service.get_permission_tree(
+        resource_type=type_map[resource_type],
+        resource_id=resource_id,
+    )
+    
+    return tree.to_dict()
+
+
+@router.post("/graph/permissions")
+async def grant_permission(
+    folder_path: str = Query(..., description="Folder path to grant access to"),
+    permission: str = Query(..., description="Permission type: view, edit, admin"),
+    grantee_type: str = Query(..., description="Type of grantee: user or group"),
+    grantee_id: str = Query(..., description="UUID of user or group"),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Grant permission on a folder.
+    
+    Permissions cascade to child documents and entities.
+    """
+    from app.services.permission_inheritance_service import (
+        get_permission_inheritance_service,
+    )
+    from app.models.graph import PermissionType
+    
+    # Map permission string to enum
+    perm_map = {
+        "view": PermissionType.VIEW,
+        "edit": PermissionType.EDIT,
+        "admin": PermissionType.ADMIN,
+    }
+    
+    if permission.lower() not in perm_map:
+        return {"error": f"Invalid permission. Must be one of: {list(perm_map.keys())}"}
+    
+    if grantee_type not in ["user", "group"]:
+        return {"error": "grantee_type must be 'user' or 'group'"}
+    
+    perm_service = get_permission_inheritance_service(db)
+    result = await perm_service.grant_permission(
+        folder_path=folder_path,
+        permission_type=perm_map[permission.lower()],
+        grantee_type=grantee_type,
+        grantee_id=uuid.UUID(grantee_id),
+        granted_by=current_user.id,
+    )
+    
+    return {
+        "status": "granted",
+        "permission_id": str(result.id),
+        "folder_path": folder_path,
+        "permission": permission,
+        "grantee_type": grantee_type,
+        "grantee_id": grantee_id,
+    }
+
+
+@router.delete("/graph/permissions")
+async def revoke_permission(
+    folder_path: str = Query(..., description="Folder path to revoke access from"),
+    grantee_type: str = Query(..., description="Type of grantee: user or group"),
+    grantee_id: str = Query(..., description="UUID of user or group"),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Revoke permission on a folder.
+    """
+    from app.services.permission_inheritance_service import (
+        get_permission_inheritance_service,
+    )
+    
+    perm_service = get_permission_inheritance_service(db)
+    revoked = await perm_service.revoke_permission(
+        folder_path=folder_path,
+        grantee_type=grantee_type,
+        grantee_id=uuid.UUID(grantee_id),
+    )
+    
+    return {
+        "status": "revoked" if revoked else "not_found",
+        "folder_path": folder_path,
+        "grantee_type": grantee_type,
+        "grantee_id": grantee_id,
+    }
+
+
+@router.get("/graph/entities")
+async def list_entities(
+    entity_type: Optional[str] = Query(None, description="Filter by entity type"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    List entities in the knowledge graph.
+    """
+    from sqlalchemy import select, func
+    from app.models.graph import Entity, EntityType
+    
+    query = select(Entity).order_by(Entity.mention_count.desc())
+    
+    if entity_type:
+        try:
+            etype = EntityType(entity_type.lower())
+            query = query.where(Entity.entity_type == etype)
+        except ValueError:
+            pass  # Invalid type, ignore filter
+    
+    query = query.offset(offset).limit(limit)
+    
+    result = await db.execute(query)
+    entities = list(result.scalars().all())
+    
+    # Get total count
+    count_query = select(func.count(Entity.id))
+    if entity_type:
+        try:
+            etype = EntityType(entity_type.lower())
+            count_query = count_query.where(Entity.entity_type == etype)
+        except ValueError:
+            pass
+    
+    count_result = await db.execute(count_query)
+    total = count_result.scalar() or 0
+    
+    return {
+        "entities": [
+            {
+                "id": str(e.id),
+                "name": e.name,
+                "type": e.entity_type.value,
+                "mention_count": e.mention_count,
+                "relationship_count": e.relationship_count,
+                "centrality": round(e.centrality_score, 4),
+                "access_level": e.access_level,
+            }
+            for e in entities
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.post("/graph/rebuild-communities")
+async def rebuild_communities(
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Manually trigger community rebuild.
+    
+    This re-runs community detection and regenerates summaries.
+    """
+    from app.services.graph_index_service import get_graph_index_service
+    
+    index_service = get_graph_index_service(db)
+    count = await index_service.rebuild_communities()
+    
+    return {
+        "status": "completed",
+        "communities_created": count,
+    }

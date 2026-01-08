@@ -66,6 +66,50 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str = "password"
     ENABLE_GRAPH_RAG: bool = False
     
+    # GraphRAG Settings (Phase 4 - rustworkx + SQLite)
+    GRAPH_CACHE_TTL_SECONDS: int = 300  # 5 minutes
+    GRAPH_MAX_HOPS: int = 1  # Max traversal depth
+    GRAPH_SCORE_WEIGHT: float = 0.3  # Weight in final score (vector=0.4, rerank=0.3, graph=0.3)
+    GRAPH_PROCESSING_WORKERS: int = 2  # ThreadPoolExecutor workers
+    GRAPH_BATCH_SIZE: int = 10  # Chunks per batch for graph indexing
+    ENABLE_COMMUNITY_SUMMARIES: bool = True  # Generate community summaries
+    ENABLE_GROUP_PERMISSIONS: bool = True  # Enable group-based RBAC
+    COMMUNITY_REBUILD_THRESHOLD: int = 50  # Rebuild communities after N new entities
+    GRAPH_ENTITY_FUZZY_THRESHOLD: int = 2  # Levenshtein distance for entity matching
+    COMMUNITY_DETECTION_ALGORITHM: str = "louvain"  # "connected_components" | "louvain"
+    LOUVAIN_RESOLUTION: float = 1.0  # Resolution parameter for Louvain
+    MIN_COMMUNITY_SIZE: int = 3  # Minimum entities for a community
+    
+    # Phase 5: Task Queue Settings
+    TASK_QUEUE_WORKERS: int = 4  # Number of async worker tasks
+    TASK_QUEUE_MAX_SIZE: int = 1000  # Max pending tasks in queue
+    JOB_CLEANUP_DAYS: int = 7  # Delete old jobs after N days
+    
+    # Phase 5: Hierarchical Chunking
+    ENABLE_HIERARCHICAL_CHUNKING: bool = True
+    PARENT_CHUNK_SIZE: int = 1024  # Parent chunk token size
+    HIERARCHY_LEVELS: int = 2  # 0=leaf, 1=section, 2=document
+    
+    # Phase 5: Auto-Retry Self-Reflection
+    ENABLE_AUTO_RETRY: bool = True
+    MAX_RETRY_ATTEMPTS: int = 2
+    RETRY_RELEVANCE_THRESHOLD: float = 0.6
+    
+    # Phase 5: Parser Settings
+    ENABLE_DOCLING_PARSER: bool = True
+    DOCLING_TIMEOUT_SECONDS: int = 60
+    ENABLE_OCR_DETECTION: bool = True
+    OCR_MIN_TEXT_THRESHOLD: int = 100  # Chars below this triggers OCR
+    
+    # Phase 5: Stream Cancellation
+    STREAM_TIMEOUT_SECONDS: int = 300  # Auto-cancel streams after this
+    
+    # Phase 5: Maintenance Jobs
+    ENABLE_MAINTENANCE_JOBS: bool = True
+    MAINTENANCE_CLEANUP_ENABLED: bool = True
+    MAINTENANCE_COMMUNITY_REBUILD_ENABLED: bool = True
+    MAINTENANCE_EMBEDDING_REFRESH_ENABLED: bool = True
+    
     # Document Storage
     UPLOAD_DIR: str = "./uploads"
     MAX_UPLOAD_SIZE_MB: int = 50

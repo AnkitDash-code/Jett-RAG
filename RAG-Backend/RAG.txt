@@ -560,3 +560,221 @@ Security & Hardening
 * Input sanitization: bleach for HTML, custom regex filters
 * TLS termination: at reverse proxy (Nginx/Traefik), not Python; but cert renewal via certbot
 * Secrets management: python-dotenv for dev, then cloud KMS or HashiCorp Vault SDK in prod​
+
+________________
+
+
+8. GraphRAG Architecture (Phase 4)
+
+8.1 Overview
+GraphRAG adds a knowledge graph layer for entity-aware retrieval, relationship traversal, and 
+community-based context. Uses rustworkx (Rust-backed Python library) + SQLite for pure-Python 
+implementation without Docker/Neo4j dependency.
+
+Technology Stack:
+* Graph Engine: rustworkx>=0.14.0 (10-100x faster than NetworkX, Windows prebuilt wheels)
+* Storage: SQLite (existing rag_backend.db, 9 new tables for graph data)
+* Background Processing: concurrent.futures.ThreadPoolExecutor (stdlib, 2 workers)
+* Entity Extraction: LLM-based via UtilityLLMClient (no spaCy to avoid 500MB model)
+* Community Detection: rustworkx.connected_components() for Phase 4A
+* Cache Strategy: Lazy reload with 5-minute TTL
+
+8.2 Graph Data Model (SQLModel Tables)
+
+Entity Tables:
+* Entity: id, name, normalized_name, entity_type, description, tenant_id, access_level
+* EntityMention: id, entity_id, chunk_id, start_pos, end_pos, confidence, mention_text
+* EntityRelationship: id, source_entity_id, target_entity_id, relationship_type, weight, metadata
+
+Community Tables:
+* Community: id, name, algorithm, node_count, created_at, summary_text
+* CommunityMembership: id, community_id, entity_id, membership_score
+
+Permission Tables:
+* Group: id, name, tenant_id, description, created_at
+* GroupMembership: id, group_id, user_id, role, added_at
+* FolderPermission: id, folder_path, group_id, user_id, permission_type, inherited_from
+
+Context Tables:
+* CommunityContext: id, community_id, summary_text, generated_at, token_count
+
+8.3 Permission Inheritance Model
+
+Hierarchy (cascading permissions):
+  Tenant → Group → Folder → Document → Chunk → Entity
+
+Resolution Logic:
+1. Check user's direct permissions on resource
+2. Check user's group memberships → group permissions
+3. Check parent folder permissions (recursive)
+4. Apply most permissive matching rule
+
+Permission Types:
+* VIEW: Read entity/document/chunk
+* EDIT: Modify entity relationships
+* ADMIN: Manage permissions, delete entities
+
+8.4 Entity Extraction Pipeline
+
+Extraction Flow:
+1. Document upload triggers ingestion
+2. Chunking creates chunks with needs_graph_processing=True
+3. Background worker picks up flagged chunks (batch_size=10)
+4. UtilityLLM.extract_entities(chunk_text) returns JSON:
+   {
+     "entities": [
+       {"name": "Tesla", "type": "ORGANIZATION", "confidence": 0.95},
+       {"name": "Elon Musk", "type": "PERSON", "confidence": 0.92}
+     ],
+     "relationships": [
+       {"source": "Elon Musk", "target": "Tesla", "type": "CEO_OF", "confidence": 0.88}
+     ]
+   }
+5. EntityExtractionService normalizes, deduplicates, links to existing entities
+6. Updates EntityMention and EntityRelationship tables
+7. Marks chunk needs_graph_processing=False
+
+Entity Linking:
+* Normalize: lowercase, strip whitespace, collapse multiple spaces
+* Fuzzy match: Levenshtein distance < 2 considered same entity
+* LLM disambiguation: For ambiguous cases, ask UtilityLLM to resolve
+
+8.5 Graph Indexing Pipeline
+
+iRAG-Style Lazy Indexing:
+* Phase 1 (Immediate): Generate embeddings, store in FAISS, mark needs_graph_processing=True
+* Phase 2 (Background): ThreadPoolExecutor processes flagged chunks
+* Phase 3 (On-demand): If query hits unprocessed chunk, process synchronously
+
+Background Worker Config:
+* Workers: 2 (GRAPH_PROCESSING_WORKERS)
+* Batch size: 10 chunks per batch (GRAPH_BATCH_SIZE)
+* Poll interval: 30 seconds
+* Max retries: 3 per chunk
+
+Community Detection:
+* Algorithm: rustworkx.connected_components() for Phase 4A
+* Optional: networkx.community.louvain_communities() for better quality (Phase 4B)
+* Trigger: After processing 50 new entities (COMMUNITY_REBUILD_THRESHOLD)
+* Output: Community assignments stored in CommunityMembership table
+
+Community Summaries:
+* Generation: UtilityLLM summarizes top-10 entities per community
+* Storage: CommunityContext table with summary_text
+* Refresh: Invalidate when community membership changes > 20%
+
+8.6 Graph-Aware Retrieval
+
+Query Classification (existing):
+* QueryClassificationService sets needs_graph=True for ENTITY and COMPARISON queries
+* Routing: use_graph=True in routing dict
+
+Graph Traversal (Step 4.5 in Enhanced Retrieval):
+1. Extract entities from query using UtilityLLM
+2. For each entity, get 1-hop neighbors from graph
+3. Fetch associated chunks via EntityMention
+4. Score graph chunks: centrality * relevance * recency
+5. Merge with vector results
+
+Hybrid Scoring:
+  final_score = 0.4 * vector_score + 0.3 * rerank_score + 0.3 * graph_score
+
+Graph Score Components:
+* Entity match: 1.0 if chunk contains query entity
+* Hop distance: 1.0 for direct, 0.5 for 1-hop, 0.25 for 2-hop
+* Centrality: PageRank or degree centrality of matched entity
+* Community relevance: Boost if entity shares community with other query entities
+
+8.7 Graph-Level RBAC
+
+Enforcement Points:
+1. Entity queries: Filter by user's graph_accessible_entities
+2. Traversal: Stop at permission boundaries (no crossing to unauthorized entities)
+3. Community summaries: Only include authorized entities in summary generation
+
+RBAC Fields (on all graph tables):
+* tenant_id: Multi-tenant isolation
+* access_level: public, internal, confidential, secret
+* department: Optional departmental filtering
+* owner_id: Creator of the entity/relationship
+
+Authorization Flow:
+1. AuthorizationService.get_graph_rbac_params(user) returns:
+   - allowed_tenant_ids
+   - allowed_access_levels
+   - allowed_departments
+   - group_memberships
+2. GraphStoreService.apply_rbac_filter(graph, params) removes unauthorized nodes
+3. Traversal only visits authorized subgraph
+
+8.8 Admin Graph Endpoints
+
+GET /v1/admin/graph/stats
+  Returns: node_count, edge_count, community_count, 
+           pending_chunks, last_index_time, graph_size_bytes
+
+POST /v1/admin/graph/reindex
+  Body: { "force": false, "document_ids": [] }
+  Returns: job_id, estimated_time
+
+GET /v1/admin/graph/communities
+  Returns: List of communities with id, name, node_count, summary_preview
+
+GET /v1/admin/graph/permissions/{resource_type}/{resource_id}
+  Returns: Permission tree showing who has access and why (direct vs inherited)
+
+POST /v1/admin/graph/permissions
+  Body: { "resource_type": "entity", "resource_id": "uuid", 
+          "grantee_type": "user|group", "grantee_id": "uuid",
+          "permission": "VIEW|EDIT|ADMIN" }
+
+8.9 Integration Points
+
+Enhanced Retrieval Pipeline (enhanced_retrieval_service.py):
+  Step 1: Load conversation context
+  Step 2: Classify query (sets needs_graph)
+  Step 3: Expand query (multi-query RAG)
+  Step 4: Execute vector + BM25 search
+  Step 4.5: [NEW] Graph traversal if needs_graph
+  Step 5: Merge and rerank results
+  Step 6: Grade relevance (self-reflection)
+  Step 7: Return enhanced result with graph metadata
+
+Document Ingestion (document_service.py):
+  After chunking → Queue chunks for graph processing
+  After graph processing → Update document.status = INDEXED_FULL
+
+Configuration (config.py):
+  ENABLE_GRAPH_RAG: bool = True
+  GRAPH_CACHE_TTL_SECONDS: int = 300
+  GRAPH_MAX_HOPS: int = 1
+  GRAPH_SCORE_WEIGHT: float = 0.3
+  GRAPH_PROCESSING_WORKERS: int = 2
+  GRAPH_BATCH_SIZE: int = 10
+  ENABLE_COMMUNITY_SUMMARIES: bool = True
+  ENABLE_GROUP_PERMISSIONS: bool = True
+  COMMUNITY_REBUILD_THRESHOLD: int = 50
+
+8.10 Performance Considerations
+
+rustworkx Benefits:
+* 10-100x faster than pure Python NetworkX
+* Memory efficient (Rust backend)
+* Prebuilt Windows wheels (~5MB)
+* Same Python API patterns
+
+Caching Strategy:
+* Graph structure: Load from SQLite into rustworkx on startup
+* Entity lookups: Redis cache with 5-min TTL
+* Community summaries: Cached in CommunityContext table
+* Traversal results: Per-query cache (not persisted)
+
+Lazy Reload:
+* On cache miss, reload specific subgraph from SQLite
+* Full graph reload on admin/graph/reindex
+* Automatic invalidation on entity/relationship changes
+
+Batch Processing:
+* Immediate: Add to processing queue on document upload
+* Background: ThreadPoolExecutor processes queue continuously
+* Rate limit: Max 50 chunks/minute to avoid overwhelming UtilityLLM

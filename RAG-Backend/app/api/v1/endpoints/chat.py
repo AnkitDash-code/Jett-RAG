@@ -280,3 +280,77 @@ async def submit_feedback(
     )
     
     return {"message": "Feedback submitted successfully"}
+
+
+# ============================================================================
+# Phase 5: Stream Cancellation Endpoints
+# ============================================================================
+
+@router.post("/stream/cancel/{stream_id}")
+async def cancel_stream(
+    stream_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Cancel an active streaming response.
+    
+    Use this to stop a long-running generation before it completes.
+    """
+    from app.services.stream_cancellation_service import get_stream_cancellation_service
+    
+    service = get_stream_cancellation_service()
+    
+    # Verify the stream belongs to this user
+    stream_info = service.get_stream_info(stream_id)
+    if not stream_info:
+        return {"success": False, "message": "Stream not found or already completed"}
+    
+    if stream_info["user_id"] != str(current_user.id):
+        return {"success": False, "message": "Stream does not belong to this user"}
+    
+    cancelled = await service.cancel(stream_id, "User requested cancellation")
+    
+    return {
+        "success": cancelled,
+        "message": "Stream cancelled" if cancelled else "Stream not found",
+        "stream_id": stream_id,
+    }
+
+
+@router.post("/stream/cancel-all")
+async def cancel_all_user_streams(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Cancel all active streams for the current user.
+    """
+    from app.services.stream_cancellation_service import get_stream_cancellation_service
+    
+    service = get_stream_cancellation_service()
+    cancelled = await service.cancel_user_streams(
+        current_user.id,
+        "User cancelled all streams",
+    )
+    
+    return {
+        "success": True,
+        "cancelled_count": cancelled,
+    }
+
+
+@router.get("/stream/active")
+async def list_active_streams(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    List active streaming sessions for the current user.
+    """
+    from app.services.stream_cancellation_service import get_stream_cancellation_service
+    
+    service = get_stream_cancellation_service()
+    streams = service.get_active_streams(user_id=current_user.id)
+    
+    return {
+        "active_streams": streams,
+        "count": len(streams),
+    }

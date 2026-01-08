@@ -502,3 +502,306 @@ class IngestionService:
             document.status = DocumentStatusEnum.ERROR
             document.error_message = str(e)
             await self.db.commit()
+
+    # =========================================================================
+    # Phase 5: New methods for background task handlers
+    # =========================================================================
+    
+    async def parse_document(self, document: Document) -> Dict[str, Any]:
+        """
+        Parse document and extract text (Step 1 for task handler).
+        """
+        parsed = await self.parser.parse(
+            document.file_path,
+            document.mime_type
+        )
+        document.page_count = parsed.get("page_count", 0)
+        await self.db.commit()
+        return parsed
+    
+    async def chunk_and_save(self, document: Document) -> List[Chunk]:
+        """
+        Chunk document and save to database (Step 2 for task handler).
+        """
+        # First parse if not already done
+        parsed = await self.parser.parse(document.file_path, document.mime_type)
+        
+        # Chunk based on structure
+        if parsed.get("sections"):
+            chunks_data = self.chunker.chunk_sections(parsed["sections"])
+        else:
+            chunks_data = self.chunker.chunk_text(parsed.get("text", ""))
+        
+        # Create chunk records
+        chunks = []
+        for chunk_data in chunks_data:
+            chunk = Chunk(
+                document_id=document.id,
+                text=chunk_data["text"],
+                content_hash=hashlib.sha256(chunk_data["text"].encode()).hexdigest(),
+                chunk_index=chunk_data["chunk_index"],
+                page_number=chunk_data.get("page_number"),
+                section_path=chunk_data.get("section_path"),
+                tenant_id=document.tenant_id,
+                access_level=document.access_level,
+                department=document.department,
+                hierarchy_level=0,  # Leaf level
+                status=ChunkStatusEnum.PENDING,
+                metadata_json=json.dumps(chunk_data.get("metadata", {})),
+            )
+            chunks.append(chunk)
+            self.db.add(chunk)
+        
+        await self.db.flush()
+        document.chunk_count = len(chunks)
+        await self.db.commit()
+        
+        logger.info(f"Created {len(chunks)} leaf chunks for document {document.id}")
+        return chunks
+    
+    async def generate_hierarchy(self, document: Document) -> int:
+        """
+        Generate parent summaries for hierarchical chunking (Step 3 for task handler).
+        
+        Creates parent chunks that summarize groups of leaf chunks,
+        enabling hierarchical retrieval where we can expand context
+        by fetching parent summaries.
+        
+        Returns:
+            Number of parent chunks created
+        """
+        from app.services.utility_llm_client import get_utility_llm
+        
+        if not getattr(settings, 'ENABLE_HIERARCHICAL_CHUNKING', False):
+            logger.info("Hierarchical chunking disabled, skipping")
+            return 0
+        
+        # Get leaf chunks for this document
+        result = await self.db.execute(
+            select(Chunk).where(
+                (Chunk.document_id == document.id) &
+                (Chunk.hierarchy_level == 0)
+            ).order_by(Chunk.chunk_index)
+        )
+        leaf_chunks = list(result.scalars().all())
+        
+        if len(leaf_chunks) < 3:
+            logger.info(f"Only {len(leaf_chunks)} chunks, skipping hierarchy")
+            return 0
+        
+        parent_chunk_size = getattr(settings, 'PARENT_CHUNK_SIZE', 1024)
+        utility_llm = get_utility_llm()
+        parent_chunks_created = 0
+        
+        # Group leaf chunks for parent summaries
+        # Each parent covers ~4-8 leaf chunks (roughly PARENT_CHUNK_SIZE tokens)
+        leaves_per_parent = max(2, parent_chunk_size // settings.CHUNK_SIZE)
+        
+        for i in range(0, len(leaf_chunks), leaves_per_parent):
+            child_group = leaf_chunks[i:i + leaves_per_parent]
+            
+            if len(child_group) < 2:
+                continue
+            
+            # Combine child texts
+            combined_text = "\n\n".join([c.text for c in child_group])
+            
+            # Generate summary using utility LLM
+            try:
+                summary = await utility_llm.summarize_text(
+                    text=combined_text,
+                    max_length=parent_chunk_size // 4,  # Summary is shorter
+                )
+            except Exception as e:
+                logger.warning(f"Failed to generate summary for parent chunk: {e}")
+                # Use first sentence of each child as fallback
+                summary = ". ".join([c.text.split(".")[0] for c in child_group if c.text])
+            
+            # Create parent chunk
+            child_ids = [str(c.id) for c in child_group]
+            parent = Chunk(
+                document_id=document.id,
+                text=summary,
+                content_hash=hashlib.sha256(summary.encode()).hexdigest(),
+                chunk_index=i // leaves_per_parent,
+                page_number=child_group[0].page_number,
+                section_path=child_group[0].section_path,
+                tenant_id=document.tenant_id,
+                access_level=document.access_level,
+                department=document.department,
+                hierarchy_level=1,  # Section level
+                children_ids=",".join(child_ids),
+                status=ChunkStatusEnum.PENDING,
+                metadata_json=json.dumps({"child_count": len(child_group)}),
+            )
+            self.db.add(parent)
+            await self.db.flush()
+            
+            # Update children to point to parent
+            for child in child_group:
+                child.parent_chunk_id = parent.id
+            
+            parent_chunks_created += 1
+        
+        await self.db.commit()
+        logger.info(f"Created {parent_chunks_created} parent chunks for document {document.id}")
+        return parent_chunks_created
+    
+    async def generate_embeddings(self, document: Document) -> int:
+        """
+        Generate embeddings for all chunks (Step 4 for task handler).
+        """
+        embedding_service = self._get_embedding_service()
+        
+        # Get all chunks (both leaf and parent)
+        result = await self.db.execute(
+            select(Chunk).where(
+                (Chunk.document_id == document.id) &
+                (Chunk.status == ChunkStatusEnum.PENDING)
+            )
+        )
+        chunks = list(result.scalars().all())
+        
+        if not chunks:
+            return 0
+        
+        # Generate embeddings in batches
+        batch_size = 32
+        total_embedded = 0
+        
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            texts = [c.text for c in batch]
+            embeddings = embedding_service.embed(texts)
+            
+            # Store embeddings (in memory for now, indexed later)
+            for j, chunk in enumerate(batch):
+                # Store embedding reference (actual embedding stored in vector DB)
+                chunk.status = ChunkStatusEnum.PENDING  # Will be EMBEDDED after indexing
+            
+            total_embedded += len(batch)
+        
+        await self.db.commit()
+        logger.info(f"Generated embeddings for {total_embedded} chunks")
+        return total_embedded
+    
+    async def index_in_vector_store(self, document: Document) -> None:
+        """
+        Index chunks in vector store (Step 5 for task handler).
+        """
+        embedding_service = self._get_embedding_service()
+        weaviate = self._get_weaviate_service()
+        
+        # Get all pending chunks
+        result = await self.db.execute(
+            select(Chunk).where(
+                (Chunk.document_id == document.id) &
+                (Chunk.status == ChunkStatusEnum.PENDING)
+            )
+        )
+        chunks = list(result.scalars().all())
+        
+        if not chunks:
+            return
+        
+        # Generate embeddings
+        chunk_texts = [c.text for c in chunks]
+        embeddings = embedding_service.embed(chunk_texts)
+        
+        if weaviate.is_available():
+            weaviate_chunks = []
+            for i, chunk in enumerate(chunks):
+                weaviate_chunks.append({
+                    "chunk_id": str(chunk.id),
+                    "document_id": str(document.id),
+                    "text": chunk.text,
+                    "embedding": embeddings[i],
+                    "document_name": document.original_filename,
+                    "page_number": chunk.page_number,
+                    "section_path": chunk.section_path,
+                    "chunk_index": chunk.chunk_index,
+                    "hierarchy_level": chunk.hierarchy_level,
+                    "parent_chunk_id": str(chunk.parent_chunk_id) if chunk.parent_chunk_id else None,
+                    "tenant_id": document.tenant_id,
+                    "access_level": document.access_level or "private",
+                    "department": document.department,
+                    "owner_id": str(document.owner_id),
+                })
+            
+            await weaviate.index_chunks_batch(weaviate_chunks)
+        
+        # Mark as embedded
+        for chunk in chunks:
+            chunk.status = ChunkStatusEnum.EMBEDDED
+            chunk.embedded_at = datetime.utcnow()
+        
+        await self.db.commit()
+        logger.info(f"Indexed {len(chunks)} chunks in vector store")
+    
+    async def extract_entities(self, document: Document) -> int:
+        """
+        Extract entities from document chunks (Step 6 for task handler).
+        """
+        if not getattr(settings, 'ENABLE_GRAPH_RAG', False):
+            logger.info("GraphRAG disabled, skipping entity extraction")
+            return 0
+        
+        from app.services.entity_extraction_service import get_entity_extraction_service
+        
+        extraction_service = get_entity_extraction_service(self.db)
+        
+        # Get chunks needing graph processing
+        result = await self.db.execute(
+            select(Chunk).where(
+                (Chunk.document_id == document.id) &
+                (Chunk.needs_graph_processing == True) &
+                (Chunk.hierarchy_level == 0)  # Only process leaf chunks
+            )
+        )
+        chunks = list(result.scalars().all())
+        
+        entities_count = 0
+        for chunk in chunks:
+            try:
+                result = await extraction_service.extract_from_chunk(
+                    chunk=chunk,
+                    tenant_id=document.tenant_id,
+                    access_level=document.access_level,
+                )
+                entities_count += len(result.entities)
+                
+                # Process and store
+                await extraction_service.process_extraction_result(
+                    result=result,
+                    tenant_id=document.tenant_id,
+                    access_level=document.access_level,
+                    department=document.department,
+                    owner_id=document.owner_id,
+                )
+                
+                chunk.needs_graph_processing = False
+            except Exception as e:
+                logger.warning(f"Entity extraction failed for chunk {chunk.id}: {e}")
+        
+        await self.db.commit()
+        logger.info(f"Extracted {entities_count} entities from {len(chunks)} chunks")
+        return entities_count
+    
+    async def index_in_graph(self, document: Document) -> None:
+        """
+        Index entities in knowledge graph (Step 7 for task handler).
+        """
+        if not getattr(settings, 'ENABLE_GRAPH_RAG', False):
+            logger.info("GraphRAG disabled, skipping graph indexing")
+            return
+        
+        from app.services.graph_index_service import get_graph_index_service
+        
+        graph_service = get_graph_index_service(self.db)
+        
+        # Trigger community detection if threshold reached
+        stats = await graph_service.get_stats()
+        if stats.get("pending_entities", 0) >= getattr(settings, 'COMMUNITY_REBUILD_THRESHOLD', 50):
+            await graph_service.detect_communities()
+        
+        logger.info(f"Graph indexing complete for document {document.id}")

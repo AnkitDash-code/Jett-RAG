@@ -466,6 +466,57 @@ Summary:"""
             logger.error(f"Conversation summarization error: {e}")
             return ""
     
+    async def summarize_text(
+        self,
+        text: str,
+        max_length: int = 256,
+    ) -> str:
+        """
+        Generate a summary of a text passage for hierarchical chunking.
+        
+        Args:
+            text: The text to summarize
+            max_length: Approximate max tokens for summary
+            
+        Returns:
+            Condensed summary of the text
+        """
+        if not self.enabled or not text:
+            # Fallback: extract first few sentences
+            sentences = text.split(".")[:3]
+            return ". ".join(s.strip() for s in sentences if s.strip()) + "."
+        
+        system_prompt = (
+            "You are a precise summarization assistant. "
+            "Generate concise summaries that capture the key information."
+        )
+        
+        prompt = f"""Summarize the following text in 2-4 sentences. Focus on:
+- Main topics and concepts
+- Key facts, entities, and relationships
+- Important conclusions or findings
+
+Text to summarize:
+{text[:4000]}
+
+Summary:"""
+        
+        try:
+            response = await self._call_llm(
+                prompt,
+                system_prompt,
+                temperature=0.3,
+                max_tokens=max_length
+            )
+            
+            return response.strip() if response else text[:max_length]
+            
+        except Exception as e:
+            logger.error(f"Text summarization error: {e}")
+            # Fallback: first sentences
+            sentences = text.split(".")[:3]
+            return ". ".join(s.strip() for s in sentences if s.strip()) + "."
+    
     async def detect_followup(
         self,
         current_query: str,
@@ -547,6 +598,389 @@ Analyze:"""
                 "is_followup": False,
                 "resolved_query": current_query,
                 "referenced_entities": [],
+            }
+    
+    # ========================================================================
+    # Entity Extraction (Phase 4 - GraphRAG)
+    # ========================================================================
+    
+    async def extract_entities(
+        self,
+        text: str,
+        entity_types: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Extract named entities from text for knowledge graph.
+        
+        Args:
+            text: Text to extract entities from
+            entity_types: Optional list of entity types to extract
+                         (PERSON, ORGANIZATION, LOCATION, DATE, EVENT, PRODUCT, TECHNOLOGY, CONCEPT)
+        
+        Returns:
+            Dict with 'entities' list, each containing:
+            - name: entity name
+            - type: entity type
+            - confidence: extraction confidence (0-1)
+            - start_pos: optional start position in text
+            - end_pos: optional end position in text
+        """
+        if not self.enabled:
+            return {"entities": [], "extraction_method": "disabled"}
+        
+        # Truncate text if too long
+        max_text_len = 2000
+        truncated = text[:max_text_len] if len(text) > max_text_len else text
+        
+        types_hint = ""
+        if entity_types:
+            types_hint = f"\nFocus on these entity types: {', '.join(entity_types)}"
+        
+        system_prompt = f"""You are a named entity recognition assistant. Extract entities from text.
+{types_hint}
+
+Entity types to identify:
+- PERSON: People, individuals
+- ORGANIZATION: Companies, institutions, teams
+- LOCATION: Places, addresses, geographic areas
+- DATE: Dates, times, periods
+- EVENT: Events, meetings, occurrences
+- PRODUCT: Products, software, tools
+- TECHNOLOGY: Technologies, frameworks, languages
+- CONCEPT: Abstract concepts, theories, methodologies
+
+Return ONLY valid JSON in this format:
+{{
+  "entities": [
+    {{"name": "entity name", "type": "ENTITY_TYPE", "confidence": 0.95}}
+  ]
+}}"""
+        
+        prompt = f"""Extract all named entities from this text:
+
+{truncated}
+
+Entities:"""
+        
+        try:
+            response = await self._call_llm(prompt, system_prompt, temperature=0.1)
+            
+            if not response:
+                return {"entities": [], "extraction_method": "llm_empty"}
+            
+            # Parse JSON
+            response = response.strip()
+            if response.startswith("```"):
+                response = re.sub(r'^```\w*\n?', '', response)
+                response = re.sub(r'\n?```$', '', response)
+            
+            result = json.loads(response)
+            entities = result.get("entities", [])
+            
+            # Validate and normalize
+            valid_types = {"PERSON", "ORGANIZATION", "LOCATION", "DATE", 
+                          "EVENT", "PRODUCT", "TECHNOLOGY", "CONCEPT", "OTHER"}
+            validated = []
+            for ent in entities:
+                if isinstance(ent, dict) and "name" in ent:
+                    ent_type = ent.get("type", "OTHER").upper()
+                    if ent_type not in valid_types:
+                        ent_type = "OTHER"
+                    validated.append({
+                        "name": str(ent.get("name", "")),
+                        "type": ent_type,
+                        "confidence": float(ent.get("confidence", 0.8)),
+                    })
+            
+            return {"entities": validated, "extraction_method": "llm"}
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse entity extraction response: {e}")
+            return {"entities": [], "extraction_method": "llm_parse_error"}
+        except Exception as e:
+            logger.error(f"Entity extraction error: {e}")
+            return {"entities": [], "extraction_method": "llm_error"}
+    
+    async def extract_relationships(
+        self,
+        text: str,
+        entities: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Extract relationships between entities in text.
+        
+        Args:
+            text: Original text
+            entities: List of entities already extracted (from extract_entities)
+        
+        Returns:
+            Dict with 'relationships' list, each containing:
+            - source: source entity name
+            - target: target entity name
+            - type: relationship type
+            - confidence: extraction confidence (0-1)
+        """
+        if not self.enabled or not entities:
+            return {"relationships": [], "extraction_method": "disabled"}
+        
+        # Build entity context
+        entity_names = [e.get("name", "") for e in entities[:20]]  # Limit to 20
+        entity_list = ", ".join(entity_names)
+        
+        # Truncate text
+        max_text_len = 1500
+        truncated = text[:max_text_len] if len(text) > max_text_len else text
+        
+        system_prompt = """You extract relationships between entities in text.
+
+Relationship types to identify:
+- WORKS_FOR: Person works for organization
+- LOCATED_IN: Entity is located in a place
+- RELATED_TO: General relationship
+- PART_OF: Entity is part of another
+- CREATED_BY: Entity was created by another
+- OWNS: Entity owns another
+- MANAGES: Entity manages another
+- MENTIONED_WITH: Entities appear together
+
+Return ONLY valid JSON in this format:
+{
+  "relationships": [
+    {"source": "Entity A", "target": "Entity B", "type": "RELATIONSHIP_TYPE", "confidence": 0.9}
+  ]
+}"""
+        
+        prompt = f"""Given these entities: {entity_list}
+
+Extract relationships from this text:
+
+{truncated}
+
+Relationships:"""
+        
+        try:
+            response = await self._call_llm(prompt, system_prompt, temperature=0.1)
+            
+            if not response:
+                return {"relationships": [], "extraction_method": "llm_empty"}
+            
+            # Parse JSON
+            response = response.strip()
+            if response.startswith("```"):
+                response = re.sub(r'^```\w*\n?', '', response)
+                response = re.sub(r'\n?```$', '', response)
+            
+            result = json.loads(response)
+            relationships = result.get("relationships", [])
+            
+            # Validate
+            valid_types = {"WORKS_FOR", "LOCATED_IN", "RELATED_TO", "PART_OF", 
+                          "CREATED_BY", "OWNS", "MANAGES", "MENTIONED_WITH", "OTHER"}
+            validated = []
+            for rel in relationships:
+                if isinstance(rel, dict) and "source" in rel and "target" in rel:
+                    rel_type = rel.get("type", "RELATED_TO").upper()
+                    if rel_type not in valid_types:
+                        rel_type = "RELATED_TO"
+                    validated.append({
+                        "source": str(rel.get("source", "")),
+                        "target": str(rel.get("target", "")),
+                        "type": rel_type,
+                        "confidence": float(rel.get("confidence", 0.7)),
+                    })
+            
+            return {"relationships": validated, "extraction_method": "llm"}
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse relationship extraction response: {e}")
+            return {"relationships": [], "extraction_method": "llm_parse_error"}
+        except Exception as e:
+            logger.error(f"Relationship extraction error: {e}")
+            return {"relationships": [], "extraction_method": "llm_error"}
+    
+    async def extract_entities_and_relationships(
+        self,
+        text: str,
+    ) -> Dict[str, Any]:
+        """
+        Combined extraction of entities and relationships in one call.
+        More efficient than separate calls for large texts.
+        
+        Returns:
+            Dict with 'entities' and 'relationships' lists
+        """
+        if not self.enabled:
+            return {
+                "entities": [],
+                "relationships": [],
+                "extraction_method": "disabled"
+            }
+        
+        # Truncate text
+        max_text_len = 2000
+        truncated = text[:max_text_len] if len(text) > max_text_len else text
+        
+        system_prompt = """You are a knowledge extraction assistant. Extract entities and relationships from text.
+
+Entity types: PERSON, ORGANIZATION, LOCATION, DATE, EVENT, PRODUCT, TECHNOLOGY, CONCEPT
+Relationship types: WORKS_FOR, LOCATED_IN, RELATED_TO, PART_OF, CREATED_BY, OWNS, MANAGES, MENTIONED_WITH
+
+Return ONLY valid JSON in this exact format:
+{
+  "entities": [
+    {"name": "Entity Name", "type": "ENTITY_TYPE", "confidence": 0.95}
+  ],
+  "relationships": [
+    {"source": "Entity A", "target": "Entity B", "type": "RELATIONSHIP_TYPE", "confidence": 0.9}
+  ]
+}"""
+        
+        prompt = f"""Extract all entities and relationships from this text:
+
+{truncated}
+
+Extraction:"""
+        
+        try:
+            response = await self._call_llm(prompt, system_prompt, temperature=0.1)
+            
+            if not response:
+                return {
+                    "entities": [],
+                    "relationships": [],
+                    "extraction_method": "llm_empty"
+                }
+            
+            # Parse JSON
+            response = response.strip()
+            if response.startswith("```"):
+                response = re.sub(r'^```\w*\n?', '', response)
+                response = re.sub(r'\n?```$', '', response)
+            
+            result = json.loads(response)
+            
+            # Validate entities
+            valid_entity_types = {"PERSON", "ORGANIZATION", "LOCATION", "DATE", 
+                                  "EVENT", "PRODUCT", "TECHNOLOGY", "CONCEPT", "OTHER"}
+            validated_entities = []
+            for ent in result.get("entities", []):
+                if isinstance(ent, dict) and "name" in ent:
+                    ent_type = ent.get("type", "OTHER").upper()
+                    if ent_type not in valid_entity_types:
+                        ent_type = "OTHER"
+                    validated_entities.append({
+                        "name": str(ent.get("name", "")),
+                        "type": ent_type,
+                        "confidence": float(ent.get("confidence", 0.8)),
+                    })
+            
+            # Validate relationships
+            valid_rel_types = {"WORKS_FOR", "LOCATED_IN", "RELATED_TO", "PART_OF", 
+                              "CREATED_BY", "OWNS", "MANAGES", "MENTIONED_WITH", "OTHER"}
+            validated_relationships = []
+            for rel in result.get("relationships", []):
+                if isinstance(rel, dict) and "source" in rel and "target" in rel:
+                    rel_type = rel.get("type", "RELATED_TO").upper()
+                    if rel_type not in valid_rel_types:
+                        rel_type = "RELATED_TO"
+                    validated_relationships.append({
+                        "source": str(rel.get("source", "")),
+                        "target": str(rel.get("target", "")),
+                        "type": rel_type,
+                        "confidence": float(rel.get("confidence", 0.7)),
+                    })
+            
+            return {
+                "entities": validated_entities,
+                "relationships": validated_relationships,
+                "extraction_method": "llm"
+            }
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse combined extraction response: {e}")
+            return {
+                "entities": [],
+                "relationships": [],
+                "extraction_method": "llm_parse_error"
+            }
+        except Exception as e:
+            logger.error(f"Combined extraction error: {e}")
+            return {
+                "entities": [],
+                "relationships": [],
+                "extraction_method": "llm_error"
+            }
+    
+    async def generate_community_summary(
+        self,
+        entity_names: List[str],
+        entity_types: List[str],
+        relationship_descriptions: List[str],
+        max_tokens: int = 150,
+    ) -> Dict[str, Any]:
+        """
+        Generate a summary for a community of entities.
+        
+        Args:
+            entity_names: Names of entities in the community
+            entity_types: Types of the entities
+            relationship_descriptions: Descriptions of relationships
+            max_tokens: Maximum tokens for summary
+        
+        Returns:
+            Dict with 'summary', 'key_topics'
+        """
+        if not self.enabled:
+            return {
+                "summary": f"Community of {len(entity_names)} entities",
+                "key_topics": entity_names[:3],
+            }
+        
+        # Build context
+        entities_desc = ", ".join(
+            f"{name} ({etype})" 
+            for name, etype in zip(entity_names[:10], entity_types[:10])
+        )
+        
+        relationships_desc = "; ".join(relationship_descriptions[:10])
+        
+        system_prompt = "You generate concise summaries of entity clusters from a knowledge graph."
+        
+        prompt = f"""Generate a 2-3 sentence summary for this cluster of related entities:
+
+Entities: {entities_desc}
+
+Relationships: {relationships_desc}
+
+Summary:"""
+        
+        try:
+            response = await self._call_llm(
+                prompt, 
+                system_prompt, 
+                temperature=0.3,
+                max_tokens=max_tokens
+            )
+            
+            if not response:
+                return {
+                    "summary": f"Community containing {', '.join(entity_names[:3])} and {len(entity_names)-3} more entities.",
+                    "key_topics": entity_names[:5],
+                }
+            
+            # Extract key topics (first few entity names)
+            key_topics = entity_names[:5]
+            
+            return {
+                "summary": response.strip(),
+                "key_topics": key_topics,
+            }
+            
+        except Exception as e:
+            logger.error(f"Community summary generation error: {e}")
+            return {
+                "summary": f"Community of {len(entity_names)} related entities.",
+                "key_topics": entity_names[:5],
             }
 
 

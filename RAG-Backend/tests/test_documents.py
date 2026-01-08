@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 import uuid
 import os
+from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.document_service import DocumentService
@@ -113,8 +114,11 @@ class TestDocumentService:
         return DocumentService(db_session)
     
     @pytest.mark.asyncio
-    async def test_upload_document(self, db_session: AsyncSession, tmp_path):
+    @patch('app.services.ingestion_tasks.enqueue_document_ingestion', new_callable=AsyncMock)
+    async def test_upload_document(self, mock_enqueue, db_session: AsyncSession, tmp_path):
         """Test document upload."""
+        mock_enqueue.return_value = uuid.uuid4()  # Return fake job ID
+        
         service = DocumentService(db_session)
         
         # Setup upload directory
@@ -138,6 +142,7 @@ class TestDocumentService:
         assert doc.owner_id == user_id
         assert doc.file_size == len(content)
         assert doc.status == DocumentStatusEnum.PROCESSING
+        mock_enqueue.assert_called_once()  # Verify ingestion was queued
     
     @pytest.mark.asyncio
     async def test_upload_invalid_extension(self, db_session: AsyncSession):
@@ -155,8 +160,11 @@ class TestDocumentService:
             )
     
     @pytest.mark.asyncio
-    async def test_list_documents_access_control(self, db_session: AsyncSession, tmp_path):
+    @patch('app.services.ingestion_tasks.enqueue_document_ingestion', new_callable=AsyncMock)
+    async def test_list_documents_access_control(self, mock_enqueue, db_session: AsyncSession, tmp_path):
         """Test that users only see their own documents."""
+        mock_enqueue.return_value = uuid.uuid4()  # Return fake job ID
+        
         service = DocumentService(db_session)
         
         os.environ["UPLOAD_DIR"] = str(tmp_path)

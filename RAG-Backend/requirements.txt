@@ -39,8 +39,9 @@ tiktoken>=0.5.0
 # Rate Limiting
 slowapi>=0.1.9
 
-# Graph (pure Python - no Neo4j needed)
+# Graph (Phase 4 - GraphRAG)
 networkx>=3.2.0
+rustworkx>=0.17.0  # High-performance Rust graph library for GraphRAG
 
 # Redis (optional - for caching and task queue)
 redis>=5.0.0

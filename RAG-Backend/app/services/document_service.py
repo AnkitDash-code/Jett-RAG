@@ -92,8 +92,17 @@ class DocumentService:
         self.db.add(document)
         await self.db.flush()
         
-        # TODO: Queue background job for processing
-        # In production: celery_app.send_task("process_document", args=[str(doc_id)])
+        # Queue background job for processing (Phase 5)
+        from app.services.ingestion_tasks import enqueue_document_ingestion
+        job_id = await enqueue_document_ingestion(
+            document_id=doc_id,
+            user_id=owner_id,
+            tenant_id=tenant_id,
+            priority=5,
+        )
+        
+        # Store job reference on document
+        document.processing_job_id = job_id
         
         return document
     
