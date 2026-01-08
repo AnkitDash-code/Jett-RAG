@@ -584,3 +584,201 @@ async def rebuild_communities(
         "status": "completed",
         "communities_created": count,
     }
+
+
+# ============================================================================
+# MEMORY GRAPH ENDPOINTS (Phase 6)
+# ============================================================================
+
+@router.get("/memory/stats")
+async def get_memory_stats(
+    user_id: Optional[str] = Query(None, description="Filter by user ID"),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get memory statistics.
+    
+    Returns counts by type, status, cache size, and average importance.
+    """
+    from app.services.memory_service import get_memory_service
+    
+    memory_service = get_memory_service(db)
+    user_uuid = uuid.UUID(user_id) if user_id else None
+    stats = await memory_service.get_memory_stats(user_uuid)
+    
+    return stats
+
+
+@router.get("/memory/links")
+async def get_memory_links(
+    source_memory_id: Optional[str] = Query(None, description="Filter by source memory"),
+    link_type: Optional[str] = Query(None, description="Filter by link type"),
+    min_strength: float = Query(0.0, ge=0.0, le=1.0, description="Minimum link strength"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get memory links for visualization and analysis.
+    
+    Returns a list of links between memories with their types and strengths.
+    Useful for building a memory graph visualization.
+    """
+    from sqlmodel import select
+    from app.models.memory import MemoryLink, Memory
+    
+    # Build query for links
+    stmt = select(MemoryLink)
+    
+    if source_memory_id:
+        stmt = stmt.where(MemoryLink.source_memory_id == uuid.UUID(source_memory_id))
+    
+    if link_type:
+        stmt = stmt.where(MemoryLink.link_type == link_type)
+    
+    stmt = stmt.where(MemoryLink.strength >= min_strength)
+    stmt = stmt.order_by(MemoryLink.strength.desc())
+    stmt = stmt.offset(offset).limit(limit)
+    
+    result = await db.execute(stmt)
+    links = list(result.scalars().all())
+    
+    # Get total count
+    count_stmt = select(MemoryLink)
+    if source_memory_id:
+        count_stmt = count_stmt.where(MemoryLink.source_memory_id == uuid.UUID(source_memory_id))
+    if link_type:
+        count_stmt = count_stmt.where(MemoryLink.link_type == link_type)
+    count_stmt = count_stmt.where(MemoryLink.strength >= min_strength)
+    
+    from sqlmodel import func
+    count_result = await db.execute(select(func.count()).select_from(count_stmt.subquery()))
+    total = count_result.scalar() or 0
+    
+    # Format response
+    return {
+        "links": [
+            {
+                "id": str(link.id),
+                "source_memory_id": str(link.source_memory_id),
+                "target_memory_id": str(link.target_memory_id),
+                "link_type": link.link_type,
+                "strength": link.strength,
+                "created_at": link.created_at.isoformat(),
+            }
+            for link in links
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/memory/graph")
+async def get_memory_graph(
+    user_id: str = Query(..., description="User ID to get memory graph for"),
+    include_archived: bool = Query(False, description="Include archived memories"),
+    min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
+    limit: int = Query(50, ge=1, le=200),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get a memory graph for visualization.
+    
+    Returns nodes (memories) and edges (links) for D3.js or similar visualization.
+    """
+    from sqlmodel import select
+    from app.models.memory import Memory, MemoryLink, MemoryStatus
+    
+    user_uuid = uuid.UUID(user_id)
+    
+    # Get memories (nodes)
+    stmt = select(Memory).where(
+        Memory.user_id == user_uuid,
+        Memory.importance_score >= min_importance,
+    )
+    
+    if not include_archived:
+        stmt = stmt.where(Memory.status == MemoryStatus.ACTIVE)
+    
+    stmt = stmt.order_by(Memory.importance_score.desc()).limit(limit)
+    
+    result = await db.execute(stmt)
+    memories = list(result.scalars().all())
+    memory_ids = [m.id for m in memories]
+    
+    # Get links (edges) between these memories
+    if memory_ids:
+        link_stmt = select(MemoryLink).where(
+            MemoryLink.source_memory_id.in_(memory_ids),
+            MemoryLink.target_memory_id.in_(memory_ids),
+        )
+        link_result = await db.execute(link_stmt)
+        links = list(link_result.scalars().all())
+    else:
+        links = []
+    
+    # Format as graph
+    nodes = [
+        {
+            "id": str(m.id),
+            "type": m.memory_type.value,
+            "status": m.status.value,
+            "content_preview": m.content[:100] + "..." if len(m.content) > 100 else m.content,
+            "importance": m.importance_score,
+            "access_count": m.access_count,
+            "created_at": m.created_at.isoformat(),
+        }
+        for m in memories
+    ]
+    
+    edges = [
+        {
+            "source": str(link.source_memory_id),
+            "target": str(link.target_memory_id),
+            "type": link.link_type,
+            "strength": link.strength,
+        }
+        for link in links
+    ]
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+    }
+
+
+@router.post("/memory/consolidate/{user_id}")
+async def consolidate_user_memories(
+    user_id: str,
+    min_cluster_size: int = Query(3, ge=2, le=10),
+    age_threshold_days: int = Query(60, ge=7, le=365),
+    current_user: CurrentUser = Depends(require_admin()),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Manually trigger memory consolidation for a user.
+    
+    This clusters old archived memories and creates consolidated summaries.
+    """
+    from app.services.memory_service import get_memory_service
+    
+    memory_service = get_memory_service(db)
+    user_uuid = uuid.UUID(user_id)
+    
+    count = await memory_service.consolidate_old_memories(
+        user_id=user_uuid,
+        min_cluster_size=min_cluster_size,
+        age_threshold_days=age_threshold_days,
+    )
+    
+    return {
+        "status": "completed",
+        "clusters_consolidated": count,
+        "user_id": user_id,
+    }

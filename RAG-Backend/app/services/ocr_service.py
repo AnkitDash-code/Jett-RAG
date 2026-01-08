@@ -1,60 +1,197 @@
 """
-OCR Detection and Fallback Service for Phase 5.
+OCR Detection and Processing Service for Phase 5.
 
-Automatically detects low-text PDFs (scanned/image-based) and routes
-them to OCR processing via Tesseract or cloud OCR services.
+Uses EasyOCR for GPU-accelerated text recognition from images and PDFs.
+EasyOCR leverages the existing PyTorch installation for GPU acceleration.
 
 Features:
+- GPU-accelerated OCR via EasyOCR (uses existing PyTorch)
 - Text density analysis to detect image-based PDFs
-- Tesseract OCR integration
-- Optional cloud OCR fallback (AWS Textract, Google Vision)
-- Async processing with job queue integration
+- Graceful degradation when EasyOCR not installed
+- Async processing with thread pool for CPU-bound work
 """
 import asyncio
 import logging
 import os
 from typing import Dict, Any, Optional, List
+from dataclasses import dataclass, field
 from pathlib import Path
+import numpy as np
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class OCRDetectionService:
+@dataclass
+class OCRResult:
+    """Result from OCR processing."""
+    text: str
+    confidence: float
+    bounding_boxes: List[Dict[str, Any]] = field(default_factory=list)
+    language: str = "en"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "text": self.text,
+            "confidence": self.confidence,
+            "bounding_boxes": self.bounding_boxes,
+            "language": self.language,
+        }
+
+
+@dataclass
+class OCRDetectionResult:
+    """Result from OCR need detection."""
+    needs_ocr: bool
+    reason: str
+    text_density: float
+    text_per_page: float
+
+
+class OCRService:
     """
-    Service for detecting and processing documents that require OCR.
+    GPU-accelerated OCR service using EasyOCR.
+    
+    EasyOCR uses PyTorch under the hood, so it automatically uses
+    the GPU if torch.cuda.is_available() returns True.
     """
     
     # Thresholds for OCR detection
     MIN_TEXT_PER_PAGE = 50  # Chars per page to consider "has text"
     MIN_TEXT_DENSITY = 0.01  # Chars per byte of file size
     
-    def __init__(self):
+    def __init__(self, languages: Optional[List[str]] = None):
+        """
+        Initialize OCR service.
+        
+        Args:
+            languages: List of language codes for EasyOCR (default: ['en'])
+                      See: https://www.jaided.ai/easyocr/
+        """
+        self.languages = languages or ['en']
         self.enabled = getattr(settings, 'ENABLE_OCR_DETECTION', False)
         self.min_text_threshold = getattr(settings, 'OCR_MIN_TEXT_THRESHOLD', 50)
-        self._tesseract_available = None
+        self._reader = None
+        self._available = None
     
-    def _check_tesseract(self) -> bool:
-        """Check if Tesseract OCR is installed."""
-        if self._tesseract_available is not None:
-            return self._tesseract_available
+    def _get_reader(self):
+        """Lazy-load EasyOCR reader (downloads models on first use)."""
+        if self._reader is None:
+            try:
+                import easyocr
+                # GPU is automatically used if available via PyTorch
+                self._reader = easyocr.Reader(
+                    self.languages,
+                    gpu=True,  # Will fallback to CPU if no GPU
+                    verbose=False,
+                )
+                logger.info(f"EasyOCR initialized with languages: {self.languages}")
+            except ImportError:
+                logger.warning(
+                    "EasyOCR not installed. Install with: pip install easyocr"
+                )
+                raise RuntimeError("EasyOCR not available")
+        return self._reader
+    
+    def _check_available(self) -> bool:
+        """Check if EasyOCR is installed and working."""
+        if self._available is not None:
+            return self._available
         
         try:
-            import pytesseract
-            # Verify tesseract binary is available
-            pytesseract.get_tesseract_version()
-            self._tesseract_available = True
-            logger.info("Tesseract OCR available")
-        except Exception:
-            self._tesseract_available = False
-            logger.warning("Tesseract OCR not available. Install tesseract-ocr and pytesseract.")
+            import easyocr
+            self._available = True
+            logger.info("EasyOCR available")
+        except ImportError:
+            self._available = False
+            logger.warning(
+                "EasyOCR not installed. OCR features disabled. "
+                "Install with: pip install easyocr"
+            )
         
-        return self._tesseract_available
+        return self._available
     
     def is_available(self) -> bool:
         """Check if OCR processing is enabled and available."""
-        return self.enabled and self._check_tesseract()
+        return self.enabled and self._check_available()
+    
+    def detect_ocr_need(
+        self,
+        file_path: str,
+        extracted_text: str,
+        page_count: int,
+    ) -> OCRDetectionResult:
+        """
+        Determine if a document needs OCR processing.
+        
+        Args:
+            file_path: Path to the document
+            extracted_text: Text already extracted via normal parsing
+            page_count: Number of pages in document
+            
+        Returns:
+            OCRDetectionResult with recommendation
+        """
+        ext = os.path.splitext(file_path)[1].lower()
+        text_length = len(extracted_text.strip())
+        
+        # Calculate metrics
+        text_per_page = text_length / max(page_count, 1)
+        text_density = 0.0
+        
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size > 0:
+                text_density = text_length / file_size
+        except OSError:
+            pass
+        
+        # Only PDFs typically need OCR fallback
+        if ext != ".pdf":
+            return OCRDetectionResult(
+                needs_ocr=False,
+                reason="Not a PDF file",
+                text_density=text_density,
+                text_per_page=text_per_page,
+            )
+        
+        if not self.enabled:
+            return OCRDetectionResult(
+                needs_ocr=False,
+                reason="OCR detection disabled",
+                text_density=text_density,
+                text_per_page=text_per_page,
+            )
+        
+        # Check text per page
+        if text_per_page < self.min_text_threshold:
+            return OCRDetectionResult(
+                needs_ocr=True,
+                reason=f"Low text density: {text_per_page:.1f} chars/page",
+                text_density=text_density,
+                text_per_page=text_per_page,
+            )
+        
+        # Check text to file size ratio for large files
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size > 50000 and text_density < self.MIN_TEXT_DENSITY:
+                return OCRDetectionResult(
+                    needs_ocr=True,
+                    reason=f"Low text/size ratio: {text_density:.4f}",
+                    text_density=text_density,
+                    text_per_page=text_per_page,
+                )
+        except OSError:
+            pass
+        
+        return OCRDetectionResult(
+            needs_ocr=False,
+            reason="Sufficient text content",
+            text_density=text_density,
+            text_per_page=text_per_page,
+        )
     
     def needs_ocr(
         self,
@@ -63,67 +200,192 @@ class OCRDetectionService:
         page_count: int,
     ) -> bool:
         """
-        Determine if a document needs OCR processing.
+        Simple check if document needs OCR.
         
-        Criteria:
-        1. Text per page is below threshold
-        2. File size is significant but text is minimal
-        3. Known image-based PDF indicators
+        For backward compatibility with OCRDetectionService interface.
+        """
+        result = self.detect_ocr_need(file_path, extracted_text, page_count)
+        if result.needs_ocr:
+            logger.info(f"OCR recommended: {result.reason}")
+        return result.needs_ocr
+    
+    async def process_image(
+        self,
+        image_input: Any,
+        detail_level: int = 0,
+    ) -> OCRResult:
+        """
+        Process a single image with OCR.
         
         Args:
-            file_path: Path to the document
-            extracted_text: Text already extracted via normal parsing
-            page_count: Number of pages in document
+            image_input: Can be:
+                - Path to image file (str or Path)
+                - PIL Image
+                - numpy array
+            detail_level: 0 = paragraph, 1 = line-by-line
             
         Returns:
-            True if OCR is recommended
+            OCRResult with extracted text and metadata
         """
-        if not self.enabled:
-            return False
+        if not self.is_available():
+            raise RuntimeError("OCR service not available")
         
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext != ".pdf":
-            return False  # Only PDFs need OCR fallback
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._process_image_sync,
+            image_input,
+            detail_level,
+        )
+    
+    def _process_image_sync(
+        self,
+        image_input: Any,
+        detail_level: int = 0,
+    ) -> OCRResult:
+        """Synchronous image OCR processing."""
+        reader = self._get_reader()
         
-        text_length = len(extracted_text.strip())
+        # Handle different input types
+        if isinstance(image_input, (str, Path)):
+            image_path = str(image_input)
+        else:
+            image_path = image_input  # PIL Image or numpy array
         
-        # Check text per page
-        if page_count > 0:
-            text_per_page = text_length / page_count
-            if text_per_page < self.min_text_threshold:
-                logger.info(
-                    f"Low text density: {text_per_page:.1f} chars/page "
-                    f"(threshold: {self.min_text_threshold})"
-                )
-                return True
-        
-        # Check text to file size ratio
         try:
-            file_size = os.path.getsize(file_path)
-            if file_size > 50000:  # > 50KB
-                text_density = text_length / file_size
-                if text_density < self.MIN_TEXT_DENSITY:
-                    logger.info(
-                        f"Low text/size ratio: {text_density:.4f} "
-                        f"({text_length} chars / {file_size} bytes)"
-                    )
-                    return True
-        except OSError:
-            pass
+            # EasyOCR with paragraph=False returns list of (bbox, text, confidence)
+            # With paragraph=True it may return different structure
+            results = reader.readtext(
+                image_path,
+                detail=1,
+                paragraph=False,  # Always use detail mode for consistent output
+            )
+            
+            if not results:
+                return OCRResult(
+                    text="",
+                    confidence=0.0,
+                    bounding_boxes=[],
+                    language=self.languages[0],
+                )
+            
+            # Extract text and calculate average confidence
+            texts = []
+            bboxes = []
+            confidences = []
+            
+            for result in results:
+                # Handle both formats: (bbox, text, conf) or (text, conf)
+                if len(result) == 3:
+                    bbox, text, conf = result
+                    bboxes.append({
+                        "coordinates": bbox,
+                        "text": text,
+                        "confidence": conf,
+                    })
+                else:
+                    text, conf = result
+                    bbox = None
+                texts.append(text)
+                confidences.append(conf)
+            
+            # Join text based on detail level preference
+            full_text = " ".join(texts) if detail_level == 0 else "\n".join(texts)
+            avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+            
+            return OCRResult(
+                text=full_text,
+                confidence=avg_confidence,
+                bounding_boxes=bboxes,
+                language=self.languages[0],
+            )
+            
+        except Exception as e:
+            logger.error(f"Image OCR failed: {e}")
+            raise
+    
+    async def process_pdf_page(
+        self,
+        pdf_path: str,
+        page_number: int,
+        dpi: int = 200,
+    ) -> OCRResult:
+        """
+        OCR a single page from a PDF.
         
-        return False
+        Args:
+            pdf_path: Path to PDF file
+            page_number: Page number (1-indexed)
+            dpi: Resolution for PDF to image conversion
+            
+        Returns:
+            OCRResult for the page
+        """
+        if not self.is_available():
+            raise RuntimeError("OCR service not available")
+        
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            self._process_pdf_page_sync,
+            pdf_path,
+            page_number,
+            dpi,
+        )
+    
+    def _process_pdf_page_sync(
+        self,
+        pdf_path: str,
+        page_number: int,
+        dpi: int = 200,
+    ) -> OCRResult:
+        """Synchronous PDF page OCR."""
+        try:
+            from pdf2image import convert_from_path
+            from PIL import Image
+        except ImportError:
+            raise RuntimeError(
+                "pdf2image not installed. Install with: pip install pdf2image"
+            )
+        
+        try:
+            # Convert single page to image
+            images = convert_from_path(
+                pdf_path,
+                dpi=dpi,
+                first_page=page_number,
+                last_page=page_number,
+                fmt='png',
+            )
+            
+            if not images:
+                return OCRResult(
+                    text="",
+                    confidence=0.0,
+                    bounding_boxes=[],
+                )
+            
+            # OCR the page image
+            image = images[0]
+            image_array = np.array(image)
+            
+            return self._process_image_sync(image_array, detail_level=1)
+            
+        except Exception as e:
+            logger.error(f"PDF page OCR failed: {e}")
+            raise
     
     async def process_with_ocr(
         self,
         file_path: str,
-        language: str = "eng",
+        language: str = "en",
     ) -> Dict[str, Any]:
         """
-        Process a document with OCR.
+        Process a full PDF document with OCR.
         
         Args:
             file_path: Path to the PDF file
-            language: Tesseract language code (default: English)
+            language: Language code (default: English)
             
         Returns:
             Dict with 'text', 'sections', 'page_count', 'metadata'
@@ -131,7 +393,6 @@ class OCRDetectionService:
         if not self.is_available():
             raise RuntimeError("OCR service not available")
         
-        # Run OCR in thread pool since it's CPU-bound
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None,
@@ -143,48 +404,57 @@ class OCRDetectionService:
     def _ocr_pdf_sync(
         self,
         file_path: str,
-        language: str = "eng",
+        language: str = "en",
     ) -> Dict[str, Any]:
         """Synchronous PDF OCR processing."""
-        import pytesseract
-        from pdf2image import convert_from_path
+        try:
+            from pdf2image import convert_from_path
+        except ImportError:
+            raise RuntimeError(
+                "pdf2image not installed. Install with: pip install pdf2image"
+            )
         
         try:
             # Convert PDF pages to images
             logger.info(f"Converting PDF to images for OCR: {file_path}")
             images = convert_from_path(
                 file_path,
-                dpi=200,  # Balance quality vs speed
+                dpi=200,
                 fmt='png',
             )
             
             page_texts = []
             sections = []
+            total_confidence = 0.0
             
             for i, image in enumerate(images, 1):
-                # Run OCR on each page
-                page_text = pytesseract.image_to_string(
-                    image,
-                    lang=language,
-                    config='--psm 1 --oem 3',  # Auto orientation + best accuracy
-                )
+                # Convert PIL to numpy for EasyOCR
+                image_array = np.array(image)
+                result = self._process_image_sync(image_array, detail_level=1)
                 
-                page_texts.append(page_text)
+                page_texts.append(result.text)
+                total_confidence += result.confidence
                 
-                if page_text.strip():
+                if result.text.strip():
                     sections.append({
-                        "text": page_text,
+                        "text": result.text,
                         "title": f"Page {i} (OCR)",
                         "page_number": i,
                         "section_path": f"Page {i}",
+                        "confidence": result.confidence,
                     })
                 
-                logger.debug(f"OCR page {i}: {len(page_text)} chars")
+                logger.debug(
+                    f"OCR page {i}: {len(result.text)} chars, "
+                    f"confidence: {result.confidence:.2f}"
+                )
             
             full_text = "\n\n".join(page_texts)
+            avg_confidence = total_confidence / len(images) if images else 0.0
             
             logger.info(
-                f"OCR complete: {len(full_text)} chars from {len(images)} pages"
+                f"OCR complete: {len(full_text)} chars from {len(images)} pages, "
+                f"avg confidence: {avg_confidence:.2f}"
             )
             
             return {
@@ -192,9 +462,11 @@ class OCRDetectionService:
                 "sections": sections,
                 "page_count": len(images),
                 "metadata": {
-                    "parser": "tesseract_ocr",
+                    "parser": "easyocr",
                     "language": language,
                     "dpi": 200,
+                    "confidence": avg_confidence,
+                    "gpu_accelerated": True,
                 },
             }
             
@@ -205,49 +477,26 @@ class OCRDetectionService:
     async def ocr_image_file(
         self,
         file_path: str,
-        language: str = "eng",
+        language: str = "en",
     ) -> str:
         """
         OCR a single image file.
         
+        Backward-compatible method for OCRDetectionService interface.
+        
         Args:
             file_path: Path to image (PNG, JPG, TIFF, etc.)
-            language: Tesseract language code
+            language: Language code
             
         Returns:
             Extracted text
         """
-        if not self.is_available():
-            raise RuntimeError("OCR service not available")
-        
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            self._ocr_image_sync,
-            file_path,
-            language,
-        )
-    
-    def _ocr_image_sync(
-        self,
-        file_path: str,
-        language: str = "eng",
-    ) -> str:
-        """Synchronous image OCR."""
-        import pytesseract
-        from PIL import Image
-        
-        try:
-            image = Image.open(file_path)
-            text = pytesseract.image_to_string(
-                image,
-                lang=language,
-                config='--psm 1 --oem 3',
-            )
-            return text
-        except Exception as e:
-            logger.error(f"Image OCR failed: {e}")
-            raise
+        result = await self.process_image(file_path, detail_level=1)
+        return result.text
+
+
+# Alias for backward compatibility
+OCRDetectionService = OCRService
 
 
 class OCRAwareDocumentParser:
@@ -255,8 +504,8 @@ class OCRAwareDocumentParser:
     Document parser with automatic OCR fallback for image-based PDFs.
     """
     
-    def __init__(self):
-        self.ocr_service = OCRDetectionService()
+    def __init__(self, languages: Optional[List[str]] = None):
+        self.ocr_service = OCRService(languages=languages)
         self._basic_parser = None
         self._docling_parser = None
     
@@ -337,7 +586,7 @@ class OCRAwareDocumentParser:
                     ocr_result = await self.ocr_service.process_with_ocr(file_path)
                     
                     # Merge results - prefer OCR text but keep metadata
-                    ocr_result["metadata"]["parser_chain"] = ["basic", "tesseract_ocr"]
+                    ocr_result["metadata"]["parser_chain"] = ["basic", "easyocr"]
                     return ocr_result
                     
                 except Exception as e:
@@ -347,7 +596,7 @@ class OCRAwareDocumentParser:
             else:
                 result["metadata"]["ocr_recommended"] = True
                 logger.warning(
-                    f"Document likely needs OCR but service unavailable: {file_path}"
+                    f"Document likely needs OCR but EasyOCR not installed: {file_path}"
                 )
         
         result["metadata"]["parser_chain"] = ["basic"]
@@ -355,21 +604,29 @@ class OCRAwareDocumentParser:
 
 
 # Singleton getters
-_ocr_service: Optional[OCRDetectionService] = None
+_ocr_service: Optional[OCRService] = None
 _ocr_parser: Optional[OCRAwareDocumentParser] = None
 
 
-def get_ocr_detection_service() -> OCRDetectionService:
-    """Get OCR detection service instance."""
+def get_ocr_service(languages: Optional[List[str]] = None) -> OCRService:
+    """Get OCR service instance."""
     global _ocr_service
     if _ocr_service is None:
-        _ocr_service = OCRDetectionService()
+        _ocr_service = OCRService(languages=languages)
     return _ocr_service
 
 
-def get_ocr_aware_parser() -> OCRAwareDocumentParser:
+# Alias for backward compatibility
+def get_ocr_detection_service() -> OCRService:
+    """Get OCR detection service instance (backward compatible)."""
+    return get_ocr_service()
+
+
+def get_ocr_aware_parser(
+    languages: Optional[List[str]] = None
+) -> OCRAwareDocumentParser:
     """Get OCR-aware document parser instance."""
     global _ocr_parser
     if _ocr_parser is None:
-        _ocr_parser = OCRAwareDocumentParser()
+        _ocr_parser = OCRAwareDocumentParser(languages=languages)
     return _ocr_parser

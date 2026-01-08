@@ -3,8 +3,11 @@ Conversation Context Service.
 
 Manages conversation history, follow-up detection, and context summarization.
 Enables multi-turn conversation support in RAG.
+
+Phase 6: Integrates with Memory Service for long-term summary storage.
 """
 import logging
+import uuid
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -141,6 +144,8 @@ class ConversationContextService:
         user_id: str,
         session_hint: Optional[str] = None,
         max_context_tokens: int = 500,
+        conversation_id: Optional[str] = None,
+        db = None,
     ) -> ConversationContext:
         """
         Get conversation context for a query.
@@ -155,6 +160,8 @@ class ConversationContextService:
             user_id: User identifier
             session_hint: Optional session identifier
             max_context_tokens: Token budget for context
+            conversation_id: Optional conversation UUID for memory persistence
+            db: Optional database session for memory persistence (Phase 6)
             
         Returns:
             ConversationContext with resolved query and relevant history
@@ -197,7 +204,13 @@ class ConversationContextService:
         # Get or generate summary if history is long
         summary = None
         if len(history) > 4:
-            summary = await self._get_or_generate_summary(session_id, history_dicts)
+            summary = await self._get_or_generate_summary(
+                session_id=session_id,
+                history=history_dicts,
+                user_id=user_id,
+                conversation_id=conversation_id,
+                db=db,
+            )
         
         # Select relevant history within token budget
         relevant_history = self._select_relevant_history(
@@ -255,8 +268,15 @@ class ConversationContextService:
         self,
         session_id: str,
         history: List[Dict[str, str]],
+        user_id: Optional[str] = None,
+        conversation_id: Optional[str] = None,
+        db = None,
     ) -> Optional[str]:
-        """Get cached summary or generate new one."""
+        """
+        Get cached summary or generate new one.
+        
+        Phase 6: If db is provided, persists summary as semantic memory.
+        """
         # Check cache
         if session_id in self._session_summaries:
             return self._session_summaries[session_id]
@@ -267,11 +287,61 @@ class ConversationContextService:
                 summary = await self._utility_llm.summarize_conversation(history)
                 if summary:
                     self._session_summaries[session_id] = summary
+                    
+                    # Phase 6: Persist as semantic memory if DB available
+                    if db is not None and user_id is not None:
+                        await self._persist_summary_as_memory(
+                            summary=summary,
+                            user_id=user_id,
+                            conversation_id=conversation_id,
+                            db=db,
+                        )
+                    
                     return summary
             except Exception as e:
                 logger.warning(f"Summarization failed: {e}")
         
         return None
+    
+    async def _persist_summary_as_memory(
+        self,
+        summary: str,
+        user_id: str,
+        conversation_id: Optional[str],
+        db,
+    ) -> None:
+        """
+        Persist conversation summary as a semantic memory (Phase 6).
+        
+        This enables cross-session recall of conversation topics.
+        """
+        try:
+            from app.services.memory_service import get_memory_service
+            from app.models.memory import MemoryType
+            
+            memory_service = get_memory_service(db)
+            
+            # Parse UUIDs
+            user_uuid = uuid.UUID(user_id) if isinstance(user_id, str) else user_id
+            conv_uuid = uuid.UUID(conversation_id) if conversation_id else None
+            
+            await memory_service.create_memory(
+                user_id=user_uuid,
+                content=f"Conversation summary: {summary}",
+                memory_type=MemoryType.SEMANTIC,
+                conversation_id=conv_uuid,
+                summary=summary,
+                metadata={
+                    "source": "conversation_summary",
+                    "auto_generated": True,
+                },
+            )
+            
+            logger.debug(f"Persisted conversation summary as semantic memory for user {user_id}")
+            
+        except Exception as e:
+            # Don't fail if memory persistence fails
+            logger.warning(f"Failed to persist summary as memory: {e}")
     
     def _select_relevant_history(
         self,

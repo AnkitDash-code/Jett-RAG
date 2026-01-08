@@ -1,5 +1,5 @@
 """
-Background Maintenance Jobs for Phase 5.
+Background Maintenance Jobs for Phase 5 and Phase 6.
 
 Scheduled tasks that run periodically to maintain system health:
 - Job cleanup (old completed/failed jobs)
@@ -7,6 +7,8 @@ Scheduled tasks that run periodically to maintain system health:
 - Vector store compaction
 - Stream cleanup (stale streams)
 - Orphaned chunk cleanup
+- Memory importance recalculation (Phase 6 - daily)
+- Memory archival (Phase 6 - weekly)
 
 Uses the Python-only task queue for scheduling.
 """
@@ -292,6 +294,146 @@ async def handle_orphan_cleanup(
 
 
 # ============================================================================
+# Phase 6: Memory Maintenance Task Handlers
+# ============================================================================
+
+@task_handler("memory_importance_update")
+async def handle_memory_importance_update(
+    job_id: uuid.UUID,
+    user_id: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Recalculate importance scores for all active memories (Phase 6).
+    
+    Formula: importance = (1 / max(days_old, 0.1)) × interaction_count × feedback_score
+    
+    Should run daily to keep importance scores current.
+    """
+    logger.info(f"Starting memory importance update")
+    
+    async with async_session_maker() as db:
+        job_service = JobService(db)
+        
+        try:
+            from app.services.memory_service import get_memory_service
+            
+            await job_service.update_progress(
+                job_id,
+                percent=10,
+                message="Loading memory service...",
+            )
+            
+            memory_service = get_memory_service(db)
+            
+            await job_service.update_progress(
+                job_id,
+                percent=20,
+                message="Recalculating importance scores...",
+            )
+            
+            # Parse user_id if provided
+            user_uuid = uuid.UUID(user_id) if user_id else None
+            
+            result = await memory_service.update_importance_scores(user_id=user_uuid)
+            
+            await job_service.mark_completed(
+                job_id,
+                result={
+                    "updated_count": result.updated_count,
+                    "update_ms": result.update_ms,
+                },
+            )
+            
+            logger.info(
+                f"Memory importance update complete: {result.updated_count} memories updated "
+                f"in {result.update_ms}ms"
+            )
+            return {
+                "updated_count": result.updated_count,
+                "update_ms": result.update_ms,
+            }
+            
+        except Exception as e:
+            logger.error(f"Memory importance update failed: {e}")
+            await job_service.mark_failed(job_id, str(e))
+            raise
+
+
+@task_handler("memory_archival")
+async def handle_memory_archival(
+    job_id: uuid.UUID,
+    importance_threshold: float = 0.3,
+    age_threshold_days: int = 30,
+    user_id: Optional[str] = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Archive low-importance memories from cache (Phase 6).
+    
+    Criteria: importance < threshold AND days_old > age_threshold
+    
+    This is CACHE EVICTION only - memories remain in DB with status=ARCHIVED.
+    Should run weekly to keep cache efficient.
+    """
+    logger.info(
+        f"Starting memory archival: threshold={importance_threshold}, "
+        f"age={age_threshold_days} days"
+    )
+    
+    async with async_session_maker() as db:
+        job_service = JobService(db)
+        
+        try:
+            from app.services.memory_service import get_memory_service
+            
+            await job_service.update_progress(
+                job_id,
+                percent=10,
+                message="Loading memory service...",
+            )
+            
+            memory_service = get_memory_service(db)
+            
+            await job_service.update_progress(
+                job_id,
+                percent=20,
+                message="Identifying low-importance memories...",
+            )
+            
+            # Parse user_id if provided
+            user_uuid = uuid.UUID(user_id) if user_id else None
+            
+            result = await memory_service.evict_low_importance_memories(
+                user_id=user_uuid,
+                importance_threshold=importance_threshold,
+                age_threshold_days=age_threshold_days,
+            )
+            
+            await job_service.mark_completed(
+                job_id,
+                result={
+                    "archived_count": result.archived_count,
+                    "update_ms": result.update_ms,
+                },
+            )
+            
+            logger.info(
+                f"Memory archival complete: {result.archived_count} memories archived "
+                f"in {result.update_ms}ms"
+            )
+            return {
+                "archived_count": result.archived_count,
+                "update_ms": result.update_ms,
+            }
+            
+        except Exception as e:
+            logger.error(f"Memory archival failed: {e}")
+            await job_service.mark_failed(job_id, str(e))
+            raise
+
+
+# ============================================================================
 # Scheduler Service
 # ============================================================================
 
@@ -313,6 +455,10 @@ class MaintenanceScheduler:
             settings, 'GRAPH_REBUILD_INTERVAL_HOURS', 6
         ) * 60 * 60
         self._stream_cleanup_interval = 5 * 60  # Every 5 minutes
+        
+        # Phase 6: Memory maintenance intervals
+        self._memory_importance_interval = 24 * 60 * 60  # Daily
+        self._memory_archival_interval = 7 * 24 * 60 * 60  # Weekly
     
     async def start(self) -> None:
         """Start the maintenance scheduler."""
@@ -341,6 +487,8 @@ class MaintenanceScheduler:
         last_job_cleanup = datetime.utcnow()
         last_graph_rebuild = datetime.utcnow()
         last_stream_cleanup = datetime.utcnow()
+        last_memory_importance = datetime.utcnow()
+        last_memory_archival = datetime.utcnow()
         
         while self._running:
             try:
@@ -362,6 +510,18 @@ class MaintenanceScheduler:
                 if (now - last_stream_cleanup).total_seconds() >= self._stream_cleanup_interval:
                     await self._schedule_maintenance("stream_cleanup")
                     last_stream_cleanup = now
+                
+                # Phase 6: Check for memory importance update (daily)
+                if getattr(settings, 'ENABLE_MEMORY_MAINTENANCE', True):
+                    if (now - last_memory_importance).total_seconds() >= self._memory_importance_interval:
+                        await self._schedule_maintenance("memory_importance_update")
+                        last_memory_importance = now
+                
+                # Phase 6: Check for memory archival (weekly)
+                if getattr(settings, 'ENABLE_MEMORY_MAINTENANCE', True):
+                    if (now - last_memory_archival).total_seconds() >= self._memory_archival_interval:
+                        await self._schedule_maintenance("memory_archival")
+                        last_memory_archival = now
                 
                 # Sleep before next check
                 await asyncio.sleep(60)  # Check every minute

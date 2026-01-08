@@ -354,3 +354,142 @@ async def list_active_streams(
         "active_streams": streams,
         "count": len(streams),
     }
+
+
+@router.get("/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: str,
+    format: str = Query("json", regex="^(json|markdown)$"),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export a conversation in JSON or Markdown format.
+    
+    Args:
+        format: 'json' or 'markdown'
+    
+    Returns:
+        Conversation data in requested format
+    """
+    from sqlmodel import select
+    from app.models.chat import Conversation, Message
+    
+    # Get conversation
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.id == uuid.UUID(conversation_id),
+            Conversation.user_id == current_user.id,
+        )
+    )
+    conversation = result.scalar_one_or_none()
+    
+    if not conversation:
+        raise NotFoundError("Conversation", conversation_id)
+    
+    # Get messages
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at)
+    )
+    messages = result.scalars().all()
+    
+    if format == "markdown":
+        # Export as markdown
+        md_lines = [
+            f"# Conversation: {conversation.title or 'Untitled'}",
+            f"",
+            f"**Created:** {conversation.created_at.isoformat()}",
+            f"",
+            "---",
+            "",
+        ]
+        
+        for msg in messages:
+            role_label = "**User:**" if msg.role == "user" else "**Assistant:**"
+            md_lines.append(role_label)
+            md_lines.append("")
+            md_lines.append(msg.content)
+            md_lines.append("")
+            md_lines.append("---")
+            md_lines.append("")
+        
+        return {
+            "format": "markdown",
+            "content": "\n".join(md_lines),
+            "filename": f"conversation_{conversation_id[:8]}.md",
+        }
+    else:
+        # Export as JSON
+        return {
+            "format": "json",
+            "conversation": {
+                "id": str(conversation.id),
+                "title": conversation.title,
+                "created_at": conversation.created_at.isoformat(),
+                "updated_at": conversation.updated_at.isoformat() if conversation.updated_at else None,
+            },
+            "messages": [
+                {
+                    "role": msg.role,
+                    "content": msg.content,
+                    "created_at": msg.created_at.isoformat(),
+                    "sources": msg.sources if hasattr(msg, "sources") else None,
+                }
+                for msg in messages
+            ],
+            "filename": f"conversation_{conversation_id[:8]}.json",
+        }
+
+
+@router.post("/conversations/import")
+async def import_conversation(
+    data: dict,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Import a conversation from JSON format.
+    
+    Body:
+        {
+            "title": "Optional title",
+            "messages": [
+                {"role": "user", "content": "..."},
+                {"role": "assistant", "content": "..."}
+            ]
+        }
+    
+    Returns:
+        New conversation ID
+    """
+    from app.models.chat import Conversation, Message
+    
+    # Create new conversation
+    conversation = Conversation(
+        id=uuid.uuid4(),
+        user_id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        title=data.get("title", "Imported Conversation"),
+    )
+    db.add(conversation)
+    
+    # Add messages
+    messages_data = data.get("messages", [])
+    for i, msg_data in enumerate(messages_data):
+        message = Message(
+            id=uuid.uuid4(),
+            conversation_id=conversation.id,
+            role=msg_data.get("role", "user"),
+            content=msg_data.get("content", ""),
+        )
+        db.add(message)
+    
+    await db.commit()
+    
+    return {
+        "success": True,
+        "conversation_id": str(conversation.id),
+        "message_count": len(messages_data),
+    }

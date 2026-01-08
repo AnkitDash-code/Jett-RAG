@@ -77,6 +77,11 @@ class EnhancedRetrievalResult:
     # Conversation context
     conversation_context: str = ""
     
+    # Phase 6: Memory context
+    memory_context: str = ""
+    memory_count: int = 0
+    memory_retrieval_ms: int = 0
+    
     # Graph retrieval (Phase 4)
     graph_context: str = ""
     graph_entities: List[str] = field(default_factory=list)
@@ -108,7 +113,8 @@ class EnhancedRetrievalResult:
             self.grading_ms +
             self.context_ms +
             self.graph_traversal_ms +
-            self.hierarchy_expansion_ms
+            self.hierarchy_expansion_ms +
+            self.memory_retrieval_ms
         )
 
 
@@ -148,6 +154,7 @@ class EnhancedRetrievalService:
         enable_expansion: bool = True,
         enable_grading: bool = True,
         enable_context: bool = True,
+        enable_memory: bool = True,
     ) -> EnhancedRetrievalResult:
         """
         Execute enhanced retrieval pipeline with query intelligence.
@@ -164,6 +171,7 @@ class EnhancedRetrievalService:
             enable_expansion: Whether to expand queries
             enable_grading: Whether to grade relevance
             enable_context: Whether to use conversation context
+            enable_memory: Whether to retrieve long-term memories (Phase 6)
             
         Returns:
             EnhancedRetrievalResult with chunks and intelligence metadata
@@ -195,6 +203,48 @@ class EnhancedRetrievalService:
             query = context.resolved_query
         
         result.context_ms = int((time.perf_counter() - t0) * 1000)
+        
+        # ====================================================================
+        # Step 1.5: Long-Term Memory Retrieval (Phase 6)
+        # ====================================================================
+        t0 = time.perf_counter()
+        
+        if enable_memory:
+            try:
+                from app.services.memory_service import get_memory_service
+                memory_service = get_memory_service(self.db)
+                
+                memory_result = await memory_service.retrieve_memories(
+                    query=query,
+                    user_id=user_id,
+                    top_k=5,
+                    relevance_threshold=0.3,
+                )
+                
+                if memory_result.memories:
+                    # Format memories as context
+                    memory_lines = []
+                    for i, memory in enumerate(memory_result.memories, 1):
+                        score = memory_result.hybrid_scores.get(str(memory.id), 0)
+                        memory_lines.append(
+                            f"[Memory {i} ({memory.memory_type.value}, relevance: {score:.2f})]: "
+                            f"{memory.content[:300]}..."
+                            if len(memory.content) > 300 else
+                            f"[Memory {i} ({memory.memory_type.value}, relevance: {score:.2f})]: "
+                            f"{memory.content}"
+                        )
+                    
+                    result.memory_context = "\n".join(memory_lines)
+                    result.memory_count = len(memory_result.memories)
+                    
+                    logger.debug(
+                        f"Retrieved {result.memory_count} memories for query "
+                        f"(retrieval: {memory_result.retrieval_ms}ms)"
+                    )
+            except Exception as e:
+                logger.warning(f"Memory retrieval failed: {e}")
+        
+        result.memory_retrieval_ms = int((time.perf_counter() - t0) * 1000)
         
         # ====================================================================
         # Step 2: Query Classification
@@ -474,6 +524,123 @@ class EnhancedRetrievalService:
             content=response,
             session_hint=session_hint or (str(conversation_id) if conversation_id else None),
         )
+    
+    # ========================================================================
+    # GRACEFUL DEGRADATION (Phase 7)
+    # ========================================================================
+    
+    async def retrieve_with_fallback(
+        self,
+        query: str,
+        user_id: uuid.UUID,
+        tenant_id: Optional[str] = None,
+        access_levels: Optional[List[str]] = None,
+        document_ids: Optional[List[str]] = None,
+        top_k: int = None,
+        conversation_id: Optional[uuid.UUID] = None,
+        session_hint: Optional[str] = None,
+    ) -> EnhancedRetrievalResult:
+        """
+        Retrieve with graceful degradation on failures.
+        
+        Fallback chain:
+        1. Full enhanced retrieval (expansion + grading + memory + graph)
+        2. Basic enhanced retrieval (expansion + grading only)
+        3. Simple vector retrieval (no intelligence)
+        4. Cached results (if available)
+        
+        Returns best available result.
+        """
+        degradation_level = 0
+        
+        # Try full enhanced retrieval
+        try:
+            return await self.retrieve(
+                query=query,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                access_levels=access_levels,
+                document_ids=document_ids,
+                top_k=top_k,
+                conversation_id=conversation_id,
+                session_hint=session_hint,
+                enable_expansion=True,
+                enable_grading=True,
+                enable_context=True,
+                enable_memory=True,
+            )
+        except Exception as e:
+            logger.warning(f"Full enhanced retrieval failed, trying degraded mode: {e}")
+            degradation_level = 1
+        
+        # Try basic enhanced retrieval (no memory/graph)
+        try:
+            return await self.retrieve(
+                query=query,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                access_levels=access_levels,
+                document_ids=document_ids,
+                top_k=top_k,
+                conversation_id=conversation_id,
+                session_hint=session_hint,
+                enable_expansion=True,
+                enable_grading=False,  # Skip grading
+                enable_context=True,
+                enable_memory=False,  # Skip memory
+            )
+        except Exception as e:
+            logger.warning(f"Basic enhanced retrieval failed, trying simple mode: {e}")
+            degradation_level = 2
+        
+        # Try simple vector retrieval
+        try:
+            base_result = await self._base_service.retrieve(
+                query=query,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                access_levels=access_levels,
+                document_ids=document_ids,
+                top_k=top_k or settings.RETRIEVAL_TOP_K,
+                conversation_id=conversation_id,
+            )
+            
+            return EnhancedRetrievalResult(
+                base_result=base_result,
+                resolved_query=query,
+                query_classification={"degraded": True, "level": degradation_level},
+            )
+        except Exception as e:
+            logger.error(f"Simple retrieval failed: {e}")
+            degradation_level = 3
+        
+        # Return empty result
+        logger.error(f"All retrieval methods failed for query: {query[:100]}")
+        
+        from app.services.retrieval_service import RetrievalResult
+        empty_result = RetrievalResult(
+            chunks=[],
+            query=query,
+            total_ms=0,
+            embedding_ms=0,
+            search_ms=0,
+            rerank_ms=0,
+        )
+        
+        return EnhancedRetrievalResult(
+            base_result=empty_result,
+            resolved_query=query,
+            query_classification={"degraded": True, "level": degradation_level, "failed": True},
+        )
+    
+    async def get_circuit_status(self) -> Dict[str, Any]:
+        """Get status of all circuit breakers used by this service."""
+        try:
+            from app.services.circuit_breaker import get_circuit_registry
+            registry = get_circuit_registry()
+            return registry.list_circuits()
+        except ImportError:
+            return {}
 
 
 def get_enhanced_retrieval_service(db: AsyncSession) -> EnhancedRetrievalService:

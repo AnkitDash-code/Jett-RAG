@@ -140,6 +140,15 @@ class ChatService:
         conversation.last_message_at = datetime.utcnow()
         conversation.updated_at = datetime.utcnow()
         
+        # Phase 6: Create episodic memory of this interaction
+        await self._create_episodic_memory(
+            user_id=user_id,
+            query=query,
+            response=llm_result["content"],
+            conversation_id=conversation.id,
+            citations=citations,
+        )
+        
         return {
             "conversation_id": str(conversation.id),
             "message_id": str(assistant_message.id),
@@ -472,3 +481,63 @@ class ChatService:
         self.db.add(log)
         await self.db.flush()
         return log
+    
+    async def _create_episodic_memory(
+        self,
+        user_id: uuid.UUID,
+        query: str,
+        response: str,
+        conversation_id: uuid.UUID,
+        citations: Optional[List[Dict]] = None,
+    ) -> None:
+        """
+        Create an episodic memory of the chat interaction (Phase 6).
+        
+        Episodic memories capture specific events/interactions and enable
+        cross-session recall of what was discussed.
+        """
+        try:
+            from app.services.memory_service import get_memory_service
+            from app.models.memory import MemoryType
+            
+            memory_service = get_memory_service(self.db)
+            
+            # Build memory content (truncate long responses)
+            response_summary = response[:300] + "..." if len(response) > 300 else response
+            memory_content = f"User asked: {query}\nAssistant responded: {response_summary}"
+            
+            # Extract related chunk IDs from citations
+            related_chunk_ids = []
+            if citations:
+                related_chunk_ids = [
+                    c.get("id", "") for c in citations if c.get("id")
+                ][:5]  # Limit to 5
+            
+            # Extract source names for metadata
+            source_names = []
+            if citations:
+                source_names = [
+                    c.get("name", "") for c in citations if c.get("name")
+                ][:3]
+            
+            await memory_service.create_memory(
+                user_id=user_id,
+                content=memory_content,
+                memory_type=MemoryType.EPISODIC,
+                conversation_id=conversation_id,
+                related_chunk_ids=related_chunk_ids,
+                metadata={
+                    "source": "chat_interaction",
+                    "auto_generated": True,
+                    "query_length": len(query),
+                    "response_length": len(response),
+                    "citation_count": len(citations) if citations else 0,
+                    "source_documents": source_names,
+                },
+            )
+            
+            logger.debug(f"Created episodic memory for user {user_id} (conversation: {conversation_id})")
+            
+        except Exception as e:
+            # Don't fail chat if memory creation fails
+            logger.warning(f"Failed to create episodic memory: {e}")

@@ -239,3 +239,96 @@ async def delete_document(
     )
     
     return {"message": "Document deleted successfully"}
+
+
+@router.get("/chunks/{chunk_id}/preview")
+async def get_chunk_preview(
+    chunk_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get a chunk preview with context for citation display.
+    
+    Returns:
+        - text: The chunk text
+        - metadata: Chunk metadata (page, section, etc.)
+        - prev_chunk_id: ID of previous chunk (if exists)
+        - next_chunk_id: ID of next chunk (if exists)
+        - document: Parent document info
+        - related_entities: Entities mentioned in chunk
+    """
+    from sqlmodel import select
+    from app.models.document import Chunk, Document
+    
+    # Get the chunk
+    result = await db.execute(
+        select(Chunk).where(Chunk.id == uuid.UUID(chunk_id))
+    )
+    chunk = result.scalar_one_or_none()
+    
+    if not chunk:
+        raise NotFoundError("Chunk", chunk_id)
+    
+    # Get parent document
+    result = await db.execute(
+        select(Document).where(Document.id == chunk.document_id)
+    )
+    document = result.scalar_one_or_none()
+    
+    if not document:
+        raise NotFoundError("Document", str(chunk.document_id))
+    
+    # Check access (owner or admin)
+    if document.owner_id != current_user.id and not current_user.is_admin:
+        raise NotFoundError("Chunk", chunk_id)  # Don't reveal existence
+    
+    # Get prev/next chunks
+    prev_chunk_id = None
+    next_chunk_id = None
+    
+    result = await db.execute(
+        select(Chunk.id)
+        .where(Chunk.document_id == chunk.document_id)
+        .where(Chunk.chunk_index == chunk.chunk_index - 1)
+    )
+    prev = result.scalar_one_or_none()
+    if prev:
+        prev_chunk_id = str(prev)
+    
+    result = await db.execute(
+        select(Chunk.id)
+        .where(Chunk.document_id == chunk.document_id)
+        .where(Chunk.chunk_index == chunk.chunk_index + 1)
+    )
+    next_c = result.scalar_one_or_none()
+    if next_c:
+        next_chunk_id = str(next_c)
+    
+    # Get related entities (if graph exists)
+    related_entities = []
+    try:
+        from app.services.graph_service import get_graph_service
+        graph_service = get_graph_service()
+        # Simple entity extraction from chunk text
+        entities = await graph_service.get_entities_in_text(chunk.text[:500])
+        related_entities = [{"name": e.name, "type": e.entity_type} for e in entities[:10]]
+    except Exception:
+        pass  # Graph not available
+    
+    return {
+        "id": str(chunk.id),
+        "text": chunk.text,
+        "metadata": chunk.metadata or {},
+        "chunk_index": chunk.chunk_index,
+        "page_number": chunk.page_number,
+        "section_path": chunk.section_path,
+        "prev_chunk_id": prev_chunk_id,
+        "next_chunk_id": next_chunk_id,
+        "document": {
+            "id": str(document.id),
+            "filename": document.original_filename,
+            "title": document.title,
+        },
+        "related_entities": related_entities,
+    }

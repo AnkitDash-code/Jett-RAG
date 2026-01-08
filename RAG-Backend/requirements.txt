@@ -62,10 +62,11 @@ pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 
-# Optional: Graph Database (Neo4j) - uncomment for GraphRAG
-# neo4j>=5.14.0
-
 # Optional: OpenTelemetry (for distributed tracing)
 # opentelemetry-sdk>=1.21.0
 # opentelemetry-instrumentation-fastapi>=0.42b0
 # opentelemetry-exporter-otlp>=1.21.0
+
+# Optional: EasyOCR (GPU-accelerated OCR using existing PyTorch)
+# easyocr>=1.7.0
+# pdf2image>=1.16.0  # Also needs poppler-utils installed on system

@@ -60,13 +60,8 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
     EMBEDDING_DIMENSION: int = 384
     
-    # Graph Database (Neo4j) - optional for Phase 2
-    NEO4J_URI: str = "bolt://localhost:7687"
-    NEO4J_USER: str = "neo4j"
-    NEO4J_PASSWORD: str = "password"
+    # GraphRAG Settings (rustworkx + SQLite)
     ENABLE_GRAPH_RAG: bool = False
-    
-    # GraphRAG Settings (Phase 4 - rustworkx + SQLite)
     GRAPH_CACHE_TTL_SECONDS: int = 300  # 5 minutes
     GRAPH_MAX_HOPS: int = 1  # Max traversal depth
     GRAPH_SCORE_WEIGHT: float = 0.3  # Weight in final score (vector=0.4, rerank=0.3, graph=0.3)
@@ -144,6 +139,69 @@ class Settings(BaseSettings):
     # Monitoring
     ENABLE_METRICS: bool = True
     LOG_LEVEL: str = "INFO"
+    
+    # ========================================================================
+    # PHASE 7: RESILIENCE & PRODUCTION SETTINGS
+    # ========================================================================
+    
+    # Circuit Breaker Settings
+    CIRCUIT_BREAKER_ENABLED: bool = True
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD: int = 5  # Failures before opening
+    CIRCUIT_BREAKER_SUCCESS_THRESHOLD: int = 2  # Successes to close
+    CIRCUIT_BREAKER_TIMEOUT_SECONDS: float = 30.0  # Time before half-open
+    
+    # LLM Circuit Breaker (more lenient)
+    LLM_CIRCUIT_FAILURE_THRESHOLD: int = 3
+    LLM_CIRCUIT_TIMEOUT_SECONDS: float = 60.0
+    
+    # Tracing Settings
+    ENABLE_TRACING: bool = True
+    TRACING_LOG_REQUESTS: bool = True
+    TRACING_LOG_RESPONSES: bool = True
+    TRACING_SLOW_REQUEST_MS: float = 1000.0  # Log warning for slow requests
+    
+    # Session Settings
+    SESSION_DURATION_DAYS: int = 30
+    MAX_SESSIONS_PER_USER: int = 10
+    
+    # Audit Settings
+    AUDIT_ENABLED: bool = True
+    AUDIT_RETENTION_DAYS: int = 365
+    
+    # Cache Settings
+    CACHE_ENABLED: bool = True
+    CACHE_DEFAULT_TTL_SECONDS: int = 300  # 5 minutes
+    CACHE_MAX_SIZE: int = 1000
+    
+    # User/Auth Cache
+    USER_CACHE_TTL_SECONDS: int = 300
+    USER_CACHE_MAX_SIZE: int = 500
+    
+    # Document Cache
+    DOCUMENT_CACHE_TTL_SECONDS: int = 600
+    DOCUMENT_CACHE_MAX_SIZE: int = 1000
+    
+    # Query Cache
+    QUERY_CACHE_TTL_SECONDS: int = 120
+    QUERY_CACHE_MAX_SIZE: int = 200
+    
+    # LLM Response Cache
+    LLM_CACHE_TTL_SECONDS: int = 1800  # 30 minutes
+    LLM_CACHE_MAX_SIZE: int = 100
+    
+    # Graceful Degradation Settings
+    GRACEFUL_DEGRADATION_ENABLED: bool = True
+    FALLBACK_TO_SIMPLE_SEARCH: bool = True  # Use simple vector search if hybrid fails
+    FALLBACK_TO_CACHED_RESPONSE: bool = True  # Use cached response if LLM fails
+    DEGRADED_MODE_LOG_LEVEL: str = "WARNING"
+    
+    # Health Check Settings
+    HEALTH_CHECK_TIMEOUT_SECONDS: float = 5.0
+    HEALTH_CHECK_INTERVAL_SECONDS: float = 30.0
+    
+    # Background Task Settings
+    CLEANUP_INTERVAL_SECONDS: float = 60.0  # Cache cleanup interval
+    METRICS_FLUSH_INTERVAL_SECONDS: float = 15.0
 
 
 @lru_cache
