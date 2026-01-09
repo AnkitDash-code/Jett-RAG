@@ -126,6 +126,194 @@ function SourceModal({
   );
 }
 
+// Modal component for searching files
+function SearchModal({
+  isOpen,
+  onClose,
+  documents,
+  onDelete,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  documents: DocumentResponse[];
+  onDelete: (id: string, name: string) => void;
+}) {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  if (!isOpen) return null;
+
+  const filteredDocs = documents.filter((doc) =>
+    doc.filename.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(0, 0, 0, 0.6)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1000,
+        backdropFilter: "blur(4px)",
+      }}
+      onClick={onClose}
+    >
+      <div
+        style={{
+          backgroundColor: "#1f2937",
+          borderRadius: "0.75rem",
+          padding: "1.5rem",
+          width: "100%",
+          maxWidth: "500px",
+          maxHeight: "80vh",
+          display: "flex",
+          flexDirection: "column",
+          border: "1px solid #374151",
+          boxShadow:
+            "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: "1rem",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "1.25rem",
+              fontWeight: 600,
+              color: "white",
+              margin: 0,
+            }}
+          >
+            Search Files
+          </h2>
+          <button
+            onClick={onClose}
+            style={{
+              color: "#9ca3af",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              fontSize: "1.25rem",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        <input
+          type="text"
+          placeholder="Search by filename..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          autoFocus
+          style={{
+            width: "100%",
+            backgroundColor: "#111827",
+            border: "1px solid #374151",
+            borderRadius: "0.5rem",
+            padding: "0.75rem",
+            color: "white",
+            marginBottom: "1rem",
+            outline: "none",
+          }}
+        />
+
+        <div style={{ overflowY: "auto", flex: 1, minHeight: "200px" }}>
+          {filteredDocs.length === 0 ? (
+            <div
+              style={{
+                textAlign: "center",
+                color: "#6b7280",
+                padding: "2rem",
+              }}
+            >
+              {searchQuery ? "No matching files found" : "No files uploaded"}
+            </div>
+          ) : (
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {filteredDocs.map((doc) => (
+                <li
+                  key={doc.id}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "0.75rem",
+                    borderRadius: "0.375rem",
+                    marginBottom: "0.5rem",
+                    backgroundColor: "#2d3748",
+                    border: "1px solid #4b5563",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      overflow: "hidden",
+                    }}
+                  >
+                    <span style={{ fontSize: "1.25rem" }}>📄</span>
+                    <div style={{ overflow: "hidden" }}>
+                      <div
+                        style={{
+                          color: "white",
+                          fontWeight: 500,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {doc.filename}
+                      </div>
+                      <div style={{ fontSize: "0.75rem", color: "#9ca3af" }}>
+                        {doc.status?.includes("indexed")
+                          ? "Indexed"
+                          : doc.status}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(doc.id, doc.filename);
+                    }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "#9ca3af",
+                      padding: "0.5rem",
+                      borderRadius: "0.25rem",
+                    }}
+                    onMouseEnter={(e) =>
+                      (e.currentTarget.style.color = "#ef4444")
+                    }
+                    onMouseLeave={(e) =>
+                      (e.currentTarget.style.color = "#9ca3af")
+                    }
+                    title="Delete file"
+                  >
+                    🗑️
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Chat() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -144,6 +332,7 @@ export default function Chat() {
   const [selectedSource, setSelectedSource] = useState<SourceCitation | null>(
     null
   );
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const { streamChat, stopStream, isStreaming } = useChatStream();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -252,7 +441,7 @@ export default function Chat() {
     const file = acceptedFiles[0];
 
     try {
-      const result = await api.uploadDocument(file);
+      const result = await api.uploadDocument(file, { title: file.name });
       toast.success(`Uploaded ${result.filename}`);
       await refreshDocuments();
     } catch (error) {
@@ -375,7 +564,7 @@ export default function Chat() {
     }
   };
 
-  const showEmptyState = documents.length === 0 && messages.length <= 1;
+  const showEmptyState = messages.length <= 1;
 
   return (
     <main className="main-content chat-page">
@@ -402,7 +591,12 @@ export default function Chat() {
                   <button onClick={open} title="Upload Document">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
                   </button>
-
+                  <button onClick={() => setIsSearchOpen(true)} title="Search Files">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="11" cy="11" r="8" />
+                      <path d="m21 21-4.3-4.3" />
+                    </svg>
+                  </button>
                 </div>
                 <button
                   onClick={handleSend}
@@ -413,6 +607,52 @@ export default function Chat() {
                 </button>
               </div>
             </div>
+
+            {documents.length > 0 && (
+              <div style={{ marginTop: "2rem", width: "100%", maxWidth: "700px" }}>
+                <h3 style={{ fontSize: "0.875rem", marginBottom: "0.5rem", color: "#9ca3af" }}>Active Documents</h3>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", justifyContent: "center" }}>
+                  {documents.map((doc) => (
+                    <div
+                      key={doc.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        padding: "0.375rem 0.75rem",
+                        backgroundColor: "#1f2937",
+                        borderRadius: "9999px",
+                        border: "1px solid #374151",
+                        fontSize: "0.75rem",
+                        color: "#e5e7eb",
+                      }}
+                    >
+                      <span>📄 {doc.filename}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDocument(doc.id, doc.filename);
+                        }}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          cursor: "pointer",
+                          color: "#9ca3af",
+                          padding: "0 0.125rem",
+                          display: "flex",
+                          alignItems: "center",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "#9ca3af")}
+                        title="Remove document"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <>
@@ -770,6 +1010,13 @@ export default function Chat() {
         <SourceModal
           source={selectedSource}
           onClose={() => setSelectedSource(null)}
+        />
+
+        <SearchModal
+          isOpen={isSearchOpen}
+          onClose={() => setIsSearchOpen(false)}
+          documents={documents}
+          onDelete={handleDeleteDocument}
         />
       </div>
     </main>

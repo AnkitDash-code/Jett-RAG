@@ -120,19 +120,27 @@ class RerankerService:
             
             # Attach scores to chunks
             for chunk, score in zip(chunks, scores):
-                if hasattr(chunk, score_field):
-                    setattr(chunk, score_field, float(score))
-                elif hasattr(chunk, '__setattr__'):
-                    setattr(chunk, score_field, float(score))
+                score_value = float(score) if score is not None else 0.0
                 
-                # Also update final_score for downstream use
-                if hasattr(chunk, 'final_score'):
-                    chunk.final_score = float(score)
+                # Try multiple ways to set the score
+                try:
+                    if hasattr(chunk, '__dict__'):
+                        chunk.__dict__[score_field] = score_value
+                        chunk.__dict__['final_score'] = score_value
+                    elif hasattr(chunk, '__setattr__'):
+                        setattr(chunk, score_field, score_value)
+                        setattr(chunk, 'final_score', score_value)
+                except (AttributeError, TypeError):
+                    # Some objects might be read-only, skip score setting
+                    pass
             
-            # Sort by rerank score
+            # Sort by rerank score (with fallback)
             reranked = sorted(
                 chunks,
-                key=lambda c: getattr(c, score_field, 0),
+                key=lambda c: (
+                    getattr(c, score_field, None) or
+                    c.__dict__.get(score_field, 0) if hasattr(c, '__dict__') else 0
+                ),
                 reverse=True
             )
             
@@ -162,3 +170,8 @@ class RerankerService:
 
 # Singleton instance
 reranker_service = RerankerService()
+
+
+def get_reranker() -> RerankerService:
+    """Get the singleton reranker service instance."""
+    return reranker_service

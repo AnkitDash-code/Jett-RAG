@@ -93,6 +93,27 @@ class ModelCacheManager:
             logger.warning(f"⚠️  {warning}")
             return True, warning  # Return True since it's optional
     
+    def cache_easyocr_model(self) -> Tuple[bool, str]:
+        """Cache EasyOCR model for image-based PDFs and scanned documents."""
+        try:
+            logger.info("📥 Caching EasyOCR model (for scanned documents)...")
+            import easyocr
+            
+            # Initialize reader - downloads models on first use (~100MB)
+            reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+            
+            logger.info("✅ EasyOCR model cached")
+            return True, "EasyOCR model ready"
+            
+        except ImportError:
+            warning = "EasyOCR not installed. Scanned document support disabled. Install with: pip install easyocr"
+            logger.warning(f"⚠️  {warning}")
+            return False, warning
+        except Exception as e:
+            error_msg = f"Failed to cache EasyOCR model: {e}"
+            logger.error(f"❌ {error_msg}")
+            return False, error_msg
+    
     def verify_tesseract(self) -> Tuple[bool, str]:
         """Verify Tesseract OCR installation."""
         try:
@@ -151,6 +172,7 @@ class ModelCacheManager:
             "LLM Model": self.verify_llm_backend(),
             "Embedding Model": self.cache_embedding_model(),
             "Reranker Model": self.cache_reranker_model(),
+            "EasyOCR Model": self.cache_easyocr_model(),
             "spaCy Model": self.cache_spacy_model(),
             "Tesseract OCR": self.verify_tesseract(),
         }
@@ -165,8 +187,8 @@ class ModelCacheManager:
             icon = "✅" if success else "❌"
             logger.info(f"{icon} {name}: {message}")
             
-            # spaCy and Tesseract are optional
-            if name not in ["Tesseract OCR", "spaCy Model"] and not success:
+            # spaCy, Tesseract, and EasyOCR are optional
+            if name not in ["Tesseract OCR", "spaCy Model", "EasyOCR Model"] and not success:
                 all_critical_success = False
         
         logger.info("")

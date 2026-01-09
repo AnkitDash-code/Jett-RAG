@@ -114,6 +114,9 @@ class DocumentService:
         is_admin: bool = False,
     ) -> Optional[Document]:
         """Get a document by ID with access control."""
+        # Expire all cached objects to get fresh data
+        self.db.expire_all()
+        
         query = select(Document).where(Document.id == document_id)
         
         # Apply access control (unless admin)

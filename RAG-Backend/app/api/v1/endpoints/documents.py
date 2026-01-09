@@ -27,7 +27,7 @@ def document_to_response(doc) -> DocumentResponse:
     """Convert Document model to response schema."""
     return DocumentResponse(
         id=str(doc.id),
-        filename=doc.filename,
+        filename=doc.original_filename,  # Use original filename for display
         original_filename=doc.original_filename,
         file_size=doc.file_size,
         mime_type=doc.mime_type,
@@ -332,3 +332,62 @@ async def get_chunk_preview(
         },
         "related_entities": related_entities,
     }
+
+
+@router.get("/vlm-status")
+async def get_vlm_status(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Get Granite VLM server status and statistics.
+    
+    Returns health status, circuit breaker state, and processing stats
+    for the remote Granite Docling VLM integration.
+    """
+    from app.config import settings
+    
+    # Check if VLM is enabled
+    if not getattr(settings, 'ENABLE_REMOTE_VLM', False):
+        return {
+            "enabled": False,
+            "message": "Remote VLM is disabled in configuration",
+            "server_url": None,
+            "is_available": False,
+        }
+    
+    try:
+        from app.services.granite_client import get_granite_client
+        
+        client = get_granite_client()
+        is_healthy = await client.health_check()
+        stats = client.get_stats()
+        
+        return {
+            "enabled": True,
+            "server_url": stats.get("api_url"),
+            "convert_endpoint": stats.get("convert_endpoint"),
+            "is_available": is_healthy,
+            "circuit_breaker_state": stats.get("circuit_breaker_state", "unknown"),
+            "stats": {
+                "total_requests": stats.get("total_requests", 0),
+                "successful_requests": stats.get("successful_requests", 0),
+                "failed_requests": stats.get("failed_requests", 0),
+                "success_rate": round(stats.get("success_rate", 0) * 100, 1),
+                "avg_processing_time_ms": round(stats.get("avg_processing_time_ms", 0), 0),
+                "last_success": stats.get("last_success"),
+                "last_failure": stats.get("last_failure"),
+            },
+            "circuit_breaker": stats.get("circuit_breaker_stats", {}),
+            "config": {
+                "timeout_seconds": getattr(settings, 'GRANITE_SERVER_TIMEOUT', 300),
+                "max_retries": getattr(settings, 'GRANITE_MAX_RETRIES', 3),
+                "max_file_size_mb": getattr(settings, 'GRANITE_MAX_FILE_SIZE_MB', 100),
+            }
+        }
+    except Exception as e:
+        return {
+            "enabled": True,
+            "is_available": False,
+            "error": str(e),
+            "message": "Failed to get VLM status",
+        }

@@ -152,15 +152,13 @@ class UtilityLLMClient:
         if not self.enabled:
             return [query]
         
-        system_prompt = """You are a query expansion assistant. Given a user query, 
-generate alternative phrasings that capture the same intent but use different words.
-Return ONLY the alternative queries, one per line, without numbering or bullets."""
+        system_prompt = "Generate alternative search queries. Return only the queries, one per line."
         
-        prompt = f"""Generate {num_variants} alternative phrasings for this query:
+        prompt = f"""Rephrase this query in {num_variants} different ways:
 
-Query: {query}
+{query}
 
-Alternative phrasings:"""
+Alternatives:"""
         
         try:
             response = await self._call_llm(prompt, system_prompt, temperature=0.7)
@@ -444,13 +442,22 @@ Evaluate relevance:"""
         
         conversation_text = "\n".join(conversation)
         
-        system_prompt = "You summarize conversations concisely, preserving key facts and context."
+        system_prompt = "You create detailed conversation summaries for context preservation. Include all important facts, entities, and topics discussed."
         
-        prompt = f"""Summarize this conversation in 2-3 sentences, focusing on the main topics and any facts mentioned:
+        prompt = f"""Create a comprehensive summary of this conversation that preserves:
 
+- All topics discussed
+- Key facts, figures, and specific information mentioned
+- Names, dates, and entities referenced
+- Questions asked and answers provided
+- Any decisions, conclusions, or action items
+
+Be thorough - this summary maintains conversation context.
+
+Conversation:
 {conversation_text}
 
-Summary:"""
+Detailed Summary:"""
         
         try:
             response = await self._call_llm(
@@ -487,19 +494,26 @@ Summary:"""
             return ". ".join(s.strip() for s in sentences if s.strip()) + "."
         
         system_prompt = (
-            "You are a precise summarization assistant. "
-            "Generate concise summaries that capture the key information."
+            "You are a detailed summarization assistant for background processing. "
+            "Create comprehensive summaries that preserve ALL key information, facts, entities, dates, numbers, and relationships. "
+            "Include specific details - this summary will be used for semantic search later."
         )
         
-        prompt = f"""Summarize the following text in 2-4 sentences. Focus on:
-- Main topics and concepts
-- Key facts, entities, and relationships
-- Important conclusions or findings
+        prompt = f"""Create a detailed summary that includes ALL important information:
 
-Text to summarize:
+- Main topics, concepts, and themes
+- ALL key facts, figures, dates, and statistics
+- ALL named entities (people, organizations, locations, products)
+- Key relationships and connections
+- Important conclusions, findings, and implications
+- Technical terms and domain-specific vocabulary
+
+Be thorough - preserve every important detail for later retrieval.
+
+Text:
 {text[:4000]}
 
-Summary:"""
+Detailed Summary:"""
         
         try:
             response = await self._call_llm(
@@ -636,20 +650,21 @@ Analyze:"""
         if entity_types:
             types_hint = f"\nFocus on these entity types: {', '.join(entity_types)}"
         
-        system_prompt = f"""You are a named entity recognition assistant. Extract entities from text.
+        system_prompt = f"""You are a comprehensive entity extraction system for knowledge graph construction.
+Extract ALL entities thoroughly - this is for background processing where completeness is critical.
 {types_hint}
 
-Entity types to identify:
-- PERSON: People, individuals
-- ORGANIZATION: Companies, institutions, teams
-- LOCATION: Places, addresses, geographic areas
-- DATE: Dates, times, periods
-- EVENT: Events, meetings, occurrences
-- PRODUCT: Products, software, tools
-- TECHNOLOGY: Technologies, frameworks, languages
-- CONCEPT: Abstract concepts, theories, methodologies
+Entity types:
+- PERSON: All people, individuals, authors, speakers
+- ORGANIZATION: All companies, institutions, teams, departments
+- LOCATION: All places, addresses, cities, countries, regions
+- DATE: All dates, times, periods, deadlines
+- EVENT: All events, meetings, conferences, milestones
+- PRODUCT: All products, software, tools, services
+- TECHNOLOGY: All technologies, frameworks, languages, platforms
+- CONCEPT: All concepts, theories, methodologies, principles
 
-Return ONLY valid JSON in this format:
+Extract EVERY entity mentioned, even if minor. Return valid JSON:
 {{
   "entities": [
     {{"name": "entity name", "type": "ENTITY_TYPE", "confidence": 0.95}}

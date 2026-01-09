@@ -1,8 +1,11 @@
 """
 Document ingestion pipeline for parsing, chunking, and embedding.
 Runs as background tasks via Celery or in-process for dev.
+
+Phase 8: Added DocTags-aware chunking for Granite VLM integration.
 """
 import os
+import re
 import uuid
 import hashlib
 import json
@@ -23,6 +26,9 @@ class ChunkingService:
     """
     Service for document chunking using LangChain's semantic-aware splitters.
     Uses RecursiveCharacterTextSplitter for structure-aware chunking.
+    
+    Phase 8: Added DocTags-aware chunking that respects structured elements
+    like tables, code blocks, and formulas.
     """
     
     def __init__(
@@ -196,6 +202,237 @@ class ChunkingService:
                     chunk_index += 1
         
         return chunks
+    
+    def chunk_doctags_aware(
+        self,
+        doctags: str,
+        text: str = "",
+        max_structured_tokens: int = 1024,
+    ) -> List[Dict[str, Any]]:
+        """
+        Chunk document with awareness of DocTags structure.
+        
+        Never splits inside structured elements like:
+        - <table>...</table>
+        - <code>...</code>
+        - <formula>...</formula>
+        
+        Args:
+            doctags: DocTags formatted content from Granite VLM
+            text: Plain text fallback if doctags parsing fails
+            max_structured_tokens: Max size for structured elements (tables, code)
+        
+        Returns:
+            List of chunks with metadata indicating structure type
+        """
+        if not doctags:
+            # Fallback to regular text chunking
+            return self.chunk_text(text) if text else []
+        
+        # Strip outer <doctag> wrapper if present
+        doctags = re.sub(r'^\s*<doctag>\s*', '', doctags, flags=re.IGNORECASE)
+        doctags = re.sub(r'\s*</doctag>\s*$', '', doctags, flags=re.IGNORECASE)
+        
+        chunks = []
+        chunk_index = 0
+        
+        # Pattern for structured elements (never split inside these)
+        structured_patterns = [
+            (r'<table>(.*?)</table>', 'table'),
+            (r'<code>(.*?)</code>', 'code'),
+            (r'<formula>(.*?)</formula>', 'formula'),
+            (r'<image>(.*?)</image>', 'image'),
+            (r'<picture>(.*?)</picture>', 'picture'),  # Granite VLM uses <picture>
+            (r'<figure>(.*?)</figure>', 'figure'),
+        ]
+        
+        # First, extract all structured elements with their positions
+        structured_elements = []
+        for pattern, element_type in structured_patterns:
+            for match in re.finditer(pattern, doctags, re.DOTALL):
+                structured_elements.append({
+                    'type': element_type,
+                    'content': match.group(0),
+                    'inner': match.group(1),
+                    'start': match.start(),
+                    'end': match.end(),
+                })
+        
+        # Sort by position
+        structured_elements.sort(key=lambda x: x['start'])
+        
+        # Process doctags, keeping structured elements intact
+        current_pos = 0
+        text_buffer = ""
+        
+        for element in structured_elements:
+            # Get text before this structured element
+            text_before = doctags[current_pos:element['start']]
+            
+            # Remove tags from text_before and add to buffer
+            clean_text = re.sub(r'<[^>]+>', ' ', text_before)
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+            
+            if clean_text:
+                text_buffer += " " + clean_text
+            
+            # If buffer is getting large, chunk it
+            if len(text_buffer) >= self.chunk_size:
+                buffer_chunks = self.chunk_text(text_buffer.strip())
+                for bc in buffer_chunks:
+                    bc["chunk_index"] = chunk_index
+                    bc["metadata"]["contains_structure"] = False
+                    chunks.append(bc)
+                    chunk_index += 1
+                text_buffer = ""
+            
+            # Handle the structured element
+            element_content = element['inner'].strip()
+            element_type = element['type']
+            
+            # For tables, try to convert to readable format
+            if element_type == 'table':
+                element_text = f"[Table]\n{element_content}\n[End Table]"
+            elif element_type == 'code':
+                element_text = f"```\n{element_content}\n```"
+            elif element_type == 'formula':
+                element_text = f"[Formula: {element_content}]"
+            elif element_type in ('image', 'picture', 'figure'):
+                # Extract image/picture description
+                desc_match = re.search(r'<desc>(.*?)</desc>', element_content, re.DOTALL)
+                if not desc_match:
+                    # Try to extract any text content
+                    clean_content = re.sub(r'<[^>]+>', ' ', element_content)
+                    clean_content = re.sub(r'\s+', ' ', clean_content).strip()
+                    desc = clean_content if clean_content else "Visual content"
+                else:
+                    desc = desc_match.group(1).strip()
+                element_text = f"[{element_type.capitalize()}: {desc}]"
+            else:
+                element_text = element_content
+            
+            # If structured element fits in chunk size, add as single chunk
+            if len(element_text) <= max_structured_tokens:
+                # Flush text buffer first if there's content
+                if text_buffer.strip():
+                    buffer_chunks = self.chunk_text(text_buffer.strip())
+                    for bc in buffer_chunks:
+                        bc["chunk_index"] = chunk_index
+                        bc["metadata"]["contains_structure"] = False
+                        chunks.append(bc)
+                        chunk_index += 1
+                    text_buffer = ""
+                
+                chunks.append({
+                    "text": element_text,
+                    "chunk_index": chunk_index,
+                    "metadata": {
+                        f"contains_{element_type}": True,
+                        "structure_type": element_type,
+                        "contains_structure": True,
+                    },
+                })
+                chunk_index += 1
+            else:
+                # Large structured element - chunk it but note it's partial
+                if element_type == 'table':
+                    # Try to split table by rows
+                    table_chunks = self._split_large_table(element_content, max_structured_tokens)
+                    for tc in table_chunks:
+                        chunks.append({
+                            "text": tc,
+                            "chunk_index": chunk_index,
+                            "metadata": {
+                                "contains_table": True,
+                                "structure_type": "table_partial",
+                                "contains_structure": True,
+                            },
+                        })
+                        chunk_index += 1
+                else:
+                    # For other large elements, just chunk normally
+                    element_chunks = self.chunk_text(element_text)
+                    for ec in element_chunks:
+                        ec["chunk_index"] = chunk_index
+                        ec["metadata"][f"contains_{element_type}"] = True
+                        ec["metadata"]["structure_type"] = f"{element_type}_partial"
+                        ec["metadata"]["contains_structure"] = True
+                        chunks.append(ec)
+                        chunk_index += 1
+            
+            current_pos = element['end']
+        
+        # Process remaining text after last structured element
+        remaining_text = doctags[current_pos:]
+        clean_remaining = re.sub(r'<[^>]+>', ' ', remaining_text)
+        clean_remaining = re.sub(r'\s+', ' ', clean_remaining).strip()
+        
+        if clean_remaining:
+            text_buffer += " " + clean_remaining
+        
+        # Flush final text buffer
+        if text_buffer.strip():
+            buffer_chunks = self.chunk_text(text_buffer.strip())
+            for bc in buffer_chunks:
+                bc["chunk_index"] = chunk_index
+                bc["metadata"]["contains_structure"] = False
+                chunks.append(bc)
+                chunk_index += 1
+        
+        # Filter out empty chunks or chunks with only XML tags
+        filtered_chunks = []
+        for chunk in chunks:
+            chunk_text = chunk.get("text", "").strip()
+            # Remove any remaining tags
+            clean_text = re.sub(r'<[^>]+>', ' ', chunk_text)
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+            
+            # Only keep chunks with actual content (at least 10 chars)
+            if clean_text and len(clean_text) >= 10:
+                chunks_copy = chunk.copy()
+                # Update text with cleaned version if it was just tags
+                if chunk_text.startswith('<') and '>' in chunk_text:
+                    chunks_copy["text"] = clean_text
+                filtered_chunks.append(chunks_copy)
+        
+        logger.info(f"DocTags-aware chunking: {len(chunks)} initial chunks, {len(filtered_chunks)} after filtering")
+        return filtered_chunks
+    
+    def _split_large_table(self, table_content: str, max_size: int) -> List[str]:
+        """Split a large table by rows while preserving header."""
+        lines = table_content.strip().split('\n')
+        
+        if len(lines) <= 2:
+            return [f"[Table]\n{table_content}\n[End Table]"]
+        
+        # Assume first 1-2 lines are header
+        header_lines = lines[:2] if len(lines) > 2 and '---' in lines[1] else lines[:1]
+        header = '\n'.join(header_lines)
+        data_lines = lines[len(header_lines):]
+        
+        chunks = []
+        current_chunk_lines = []
+        current_size = len(header)
+        
+        for line in data_lines:
+            line_size = len(line) + 1  # +1 for newline
+            
+            if current_size + line_size > max_size and current_chunk_lines:
+                # Create chunk with header + current lines
+                chunk_content = header + '\n' + '\n'.join(current_chunk_lines)
+                chunks.append(f"[Table (continued)]\n{chunk_content}\n[End Table]")
+                current_chunk_lines = [line]
+                current_size = len(header) + line_size
+            else:
+                current_chunk_lines.append(line)
+                current_size += line_size
+        
+        # Add final chunk
+        if current_chunk_lines:
+            chunk_content = header + '\n' + '\n'.join(current_chunk_lines)
+            chunks.append(f"[Table]\n{chunk_content}\n[End Table]")
+        
+        return chunks if chunks else [f"[Table]\n{table_content}\n[End Table]"]
 
 
 class DocumentParser:
@@ -326,14 +563,29 @@ class IngestionService:
     """
     Main ingestion orchestrator.
     Handles the full pipeline: parse -> chunk -> embed -> store.
+    
+    Phase 8: Uses EnhancedDocumentParser with Granite VLM for PDFs.
     """
     
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.parser = DocumentParser()
+        self._parser = None  # Lazy load to use EnhancedDocumentParser
         self.chunker = ChunkingService()
         self._embedding_service = None
         self._weaviate_service = None
+    
+    @property
+    def parser(self):
+        """Lazy load parser - uses EnhancedDocumentParser with Granite VLM."""
+        if self._parser is None:
+            try:
+                from app.services.docling_parser import get_enhanced_document_parser
+                self._parser = get_enhanced_document_parser()
+                logger.info("Using EnhancedDocumentParser with Granite VLM support")
+            except ImportError:
+                self._parser = DocumentParser()
+                logger.info("Using basic DocumentParser (Docling not available)")
+        return self._parser
     
     def _get_embedding_service(self):
         """Lazy load embedding service."""
@@ -388,10 +640,27 @@ class IngestionService:
             # Step 2: Chunk document
             logger.info(f"[PROCESSING] Step 2/6: Chunking document...")
             chunk_start = time.time()
-            if parsed.get("sections"):
+            
+            # Check if parsed with Granite VLM (has doctags)
+            parser_type = parsed.get("metadata", {}).get("parser", "")
+            doctags = parsed.get("doctags", "")
+            
+            if parser_type == "granite_vlm" and doctags:
+                # Use DocTags-aware chunking for structure preservation
+                logger.info("[PROCESSING]   Using DocTags-aware chunking (Granite VLM)")
+                chunks_data = self.chunker.chunk_doctags_aware(
+                    doctags=doctags,
+                    text=parsed.get("text", ""),
+                )
+            elif parsed.get("sections"):
+                # Use section-based chunking
+                logger.info("[PROCESSING]   Using section-based chunking")
                 chunks_data = self.chunker.chunk_sections(parsed["sections"])
             else:
+                # Fall back to basic text chunking
+                logger.info("[PROCESSING]   Using basic text chunking")
                 chunks_data = self.chunker.chunk_text(parsed.get("text", ""))
+            
             chunk_time = time.time() - chunk_start
             logger.info(f"[PROCESSING] Step 2 complete: Created {len(chunks_data)} chunks in {chunk_time:.2f}s")
             
@@ -420,12 +689,17 @@ class IngestionService:
                 chunks.append(chunk)
                 self.db.add(chunk)
             
-            # Flush to get chunk IDs
-            await self.db.flush()
+            # Commit to ensure chunks are saved before embedding
+            await self.db.commit()
             db_time = time.time() - db_start
             logger.info(f"[PROCESSING] Step 3 complete: Saved {len(chunks)} chunks in {db_time:.2f}s")
             
+            # Need to re-fetch chunks ? No, we can continue using them, 
+            # but for updates later, we should ensure they are attached or use IDs.
+            # It's safer to not rely on the `chunks` objects for update if we commit here.
+            
             document.chunk_count = len(chunks)
+            await self.db.commit() # Save doc count
             
             # Step 4: Generate embeddings
             logger.info(f"[PROCESSING] Step 4/6: Loading embedding model...")
@@ -465,26 +739,37 @@ class IngestionService:
                 indexed_count = await weaviate.index_chunks_batch(weaviate_chunks)
                 index_time = time.time() - index_start
                 logger.info(f"[PROCESSING] Step 5 complete: Indexed {indexed_count} chunks in {index_time:.2f}s")
+             
+                # Update chunk status
+                # Fetch chunks again to be safe for update
+                # Or use the objects if they are still valid (attached to session after commit?)
+                # In asyncio scoped session, often they are not.
+                # Let's perform a bulk update statement instead of object update.
+                from sqlalchemy import update
+                stmt = update(Chunk).where(
+                    Chunk.document_id == document.id
+                ).values(
+                    status=ChunkStatusEnum.EMBEDDED,
+                    embedded_at=datetime.utcnow()
+                )
+                await self.db.execute(stmt)
                 
-                if indexed_count == len(chunks):
-                    for chunk in chunks:
-                        chunk.status = ChunkStatusEnum.EMBEDDED
-                        chunk.embedded_at = datetime.utcnow()
-                else:
-                    logger.warning(f"[PROCESSING] Only indexed {indexed_count}/{len(chunks)} chunks")
-                    # Mark chunks as indexed anyway for now
-                    for chunk in chunks:
-                        chunk.status = ChunkStatusEnum.EMBEDDED
-                        chunk.embedded_at = datetime.utcnow()
             else:
                 logger.warning("[PROCESSING] Weaviate not available - using FAISS fallback")
-                # Still mark as embedded for DB fallback search
-                for chunk in chunks:
-                    chunk.status = ChunkStatusEnum.EMBEDDED
-                    chunk.embedded_at = datetime.utcnow()
+                # FAISS fallback update
+                from sqlalchemy import update
+                stmt = update(Chunk).where(
+                    Chunk.document_id == document.id
+                ).values(
+                    status=ChunkStatusEnum.EMBEDDED,
+                    embedded_at=datetime.utcnow()
+                )
+                await self.db.execute(stmt)
             
             # Step 6: Update document status
             logger.info(f"[PROCESSING] Step 6/6: Finalizing document status...")
+            # Re-fetch document to ensure it's fresh
+            await self.db.refresh(document)
             document.status = DocumentStatusEnum.INDEXED_LIGHT
             document.indexed_at = datetime.utcnow()
             document.updated_at = datetime.utcnow()

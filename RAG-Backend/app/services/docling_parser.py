@@ -1,42 +1,53 @@
 """
-Docling Parser Integration for Phase 5.
+Docling Parser Integration for Phase 8.
 
 Uses Docling for advanced document parsing with:
 - Table extraction
-- Image extraction with captions
-- Document structure recognition
+- Image extraction with VLM-generated descriptions (via Granite Docling 258M)
+- Document structure recognition with DocTags
 - Enhanced PDF handling
 
-Docling: https://github.com/DS4SD/docling
+Pipeline:
+1. Try Granite VLM (remote) for PDFs - provides DocTags, image descriptions
+2. Fallback to local Docling library
+3. Fallback raises error
+
+Docling: https://github.com/docling-project/docling
+Granite VLM: ibm/granite-docling via Ollama API
 """
 import asyncio
 import logging
 import os
+import re
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 from app.config import settings
+from app.services.ocr_service import OCRService
 
 logger = logging.getLogger(__name__)
 
 
 class DoclingParser:
     """
-    Advanced document parser using Docling library.
+    Advanced document parser using Docling library + optional Granite VLM.
     
     Provides enhanced parsing for:
     - Complex PDF documents with tables/images
     - Multi-column layouts
     - Document structure (headings, sections)
-    - Embedded images with captions
+    - Embedded images with VLM-generated descriptions
     
-    Falls back to basic pdfplumber if Docling is unavailable.
+    Falls back to basic pdfplumber if Docling/VLM is unavailable.
     """
     
     def __init__(self):
         self.enabled = getattr(settings, 'ENABLE_DOCLING_PARSER', False)
         self.timeout = getattr(settings, 'DOCLING_TIMEOUT_SECONDS', 120)
+        self.vlm_enabled = getattr(settings, 'ENABLE_REMOTE_VLM', False)
         self._docling_available = None
+        self._granite_client = None
+        self._ocr_service = OCRService()
     
     def _check_docling(self) -> bool:
         """Check if Docling is installed and available."""
@@ -53,33 +64,282 @@ class DoclingParser:
         
         return self._docling_available
     
+    def _get_granite_client(self):
+        """Get Granite VLM client (lazy loading)."""
+        if self._granite_client is None and self.vlm_enabled:
+            try:
+                from app.services.granite_client import get_granite_client
+                self._granite_client = get_granite_client()
+                logger.info("Granite VLM client initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Granite VLM client: {e}")
+                self._granite_client = None
+        return self._granite_client
+    
     def is_available(self) -> bool:
         """Check if Docling parsing is enabled and available."""
-        return self.enabled and self._check_docling()
+        return self.enabled and (self._check_docling() or self.vlm_enabled)
     
     async def parse(self, file_path: str) -> Dict[str, Any]:
         """
-        Parse document using Docling.
+        Parse document using Granite VLM or Docling.
+        
+        Pipeline:
+        1. Try Granite VLM (remote) for PDFs
+        2. Fallback to local Docling
+        3. Fallback raises error
         
         Returns:
             Dict with keys:
             - text: Full extracted text
             - sections: List of sections with text, title, hierarchy
             - tables: List of extracted tables
-            - images: List of image metadata
+            - images: List of image metadata (with VLM descriptions if available)
             - page_count: Number of pages
             - metadata: Document metadata
+            - doctags: DocTags format (if from VLM)
         """
-        if not self.is_available():
-            raise RuntimeError("Docling parser not available")
+        ext = os.path.splitext(file_path)[1].lower()
         
-        # Run in thread pool since Docling is CPU-bound
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            self._parse_sync,
-            file_path,
-        )
+        # Try Granite VLM first for PDFs if enabled
+        if ext == ".pdf" and self.vlm_enabled:
+            try:
+                result = await self._parse_with_granite_vlm(file_path)
+                logger.info(f"Parsed with Granite VLM: {os.path.basename(file_path)}")
+                return result
+            except Exception as e:
+                logger.warning(
+                    f"Granite VLM parsing failed, falling back to local Docling: {e}"
+                )
+        
+        # Fallback to local Docling
+        if self._check_docling():
+            try:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    None,
+                    self._parse_sync,
+                    file_path,
+                )
+                logger.info(f"Parsed with local Docling: {os.path.basename(file_path)}")
+                
+                # Check if we need OCR fallback
+                extracted_text = result.get("text", "").strip()
+                page_count = result.get("page_count", 1)
+                
+                if self._ocr_service.is_available():
+                    needs_ocr = self._ocr_service.needs_ocr(
+                        file_path, extracted_text, page_count
+                    )
+                    
+                    if needs_ocr:
+                        logger.info(
+                            f"Docling returned insufficient text ({len(extracted_text)} chars), "
+                            f"triggering EasyOCR fallback"
+                        )
+                        try:
+                            ocr_result = await self._ocr_service.process_with_ocr(file_path)
+                            ocr_text = ocr_result.get("text", "").strip()
+                            
+                            if ocr_text and len(ocr_text) > len(extracted_text):
+                                logger.info(
+                                    f"EasyOCR extracted {len(ocr_text)} chars vs "
+                                    f"Docling {len(extracted_text)} chars, using OCR text"
+                                )
+                                result["text"] = ocr_text
+                                result["sections"] = ocr_result.get("sections", result.get("sections", []))
+                                result["metadata"]["ocr_fallback"] = True
+                                result["metadata"]["ocr_confidence"] = ocr_result.get("metadata", {}).get("confidence", 0.0)
+                        except Exception as ocr_error:
+                            logger.warning(f"EasyOCR fallback failed: {ocr_error}")
+                
+                return result
+            except Exception as e:
+                logger.error(f"Local Docling parsing failed: {e}")
+                raise
+        
+        # No Docling available, try basic parser with OCR fallback
+        logger.warning("Docling not available, using basic parser with OCR fallback")
+        result = await self._parse_basic(file_path)
+        
+        # Check if we need OCR fallback for scanned documents
+        extracted_text = result.get("text", "").strip()
+        page_count = result.get("page_count", 1)
+        
+        if self._ocr_service.is_available() and ext == ".pdf":
+            needs_ocr = self._ocr_service.needs_ocr(
+                file_path, extracted_text, page_count
+            )
+            
+            if needs_ocr:
+                logger.info(
+                    f"Basic parser returned insufficient text ({len(extracted_text)} chars), "
+                    f"triggering EasyOCR fallback"
+                )
+                try:
+                    ocr_result = await self._ocr_service.process_with_ocr(file_path)
+                    ocr_text = ocr_result.get("text", "").strip()
+                    
+                    if ocr_text and len(ocr_text) > len(extracted_text):
+                        logger.info(
+                            f"EasyOCR extracted {len(ocr_text)} chars vs "
+                            f"basic parser {len(extracted_text)} chars, using OCR text"
+                        )
+                        result["text"] = ocr_text
+                        result["sections"] = ocr_result.get("sections", result.get("sections", []))
+                        result["metadata"]["ocr_fallback"] = True
+                        result["metadata"]["ocr_confidence"] = ocr_result.get("metadata", {}).get("confidence", 0.0)
+                except Exception as ocr_error:
+                    logger.warning(f"EasyOCR fallback failed: {ocr_error}")
+        
+        return result
+    
+    async def _parse_with_granite_vlm(self, file_path: str) -> Dict[str, Any]:
+        """Parse document using remote Granite VLM via /v1/convert."""
+        from app.services.circuit_breaker import CircuitOpenError
+        
+        granite_client = self._get_granite_client()
+        
+        if granite_client is None:
+            raise RuntimeError("Granite VLM client not available")
+        
+        # Check file size
+        file_size_mb = os.path.getsize(file_path) / (1024 ** 2)
+        max_size = getattr(settings, 'GRANITE_MAX_FILE_SIZE_MB', 100)
+        
+        if file_size_mb > max_size:
+            raise ValueError(
+                f"File ({file_size_mb:.1f}MB) exceeds Granite max size ({max_size}MB)"
+            )
+        
+        try:
+            # Call Granite VLM
+            vlm_result = await granite_client.convert_document(
+                file_path,
+                extract_images=True,
+                extract_tables=True,
+            )
+            
+            logger.info(
+                f"Granite VLM result: {len(vlm_result.get('tables', []))} tables, "
+                f"{len(vlm_result.get('images', []))} images, "
+                f"{vlm_result.get('page_count', 0)} pages"
+            )
+            
+            # Convert to standard format with sections
+            sections = self._convert_doctags_to_sections(
+                vlm_result.get("doctags", ""),
+                vlm_result.get("text", ""),
+            )
+            
+            result = {
+                "text": vlm_result.get("text", ""),
+                "sections": sections,
+                "tables": vlm_result.get("tables", []),
+                "images": vlm_result.get("images", []),
+                "page_count": vlm_result.get("page_count", 1),
+                "metadata": vlm_result.get("metadata", {}),
+                "doctags": vlm_result.get("doctags", ""),  # Keep for DocTags-aware chunking
+                "markdown": vlm_result.get("markdown", ""),
+            }
+            
+            # Check if we need OCR fallback (empty or insufficient text)
+            extracted_text = result["text"].strip()
+            page_count = result["page_count"]
+            
+            if self._ocr_service.is_available():
+                needs_ocr = self._ocr_service.needs_ocr(
+                    file_path, extracted_text, page_count
+                )
+                
+                if needs_ocr:
+                    logger.info(
+                        f"Granite VLM returned insufficient text ({len(extracted_text)} chars), "
+                        f"triggering EasyOCR fallback"
+                    )
+                    try:
+                        ocr_result = await self._ocr_service.process_with_ocr(file_path)
+                        ocr_text = ocr_result.get("text", "").strip()
+                        
+                        if ocr_text and len(ocr_text) > len(extracted_text):
+                            logger.info(
+                                f"EasyOCR extracted {len(ocr_text)} chars vs "
+                                f"Granite {len(extracted_text)} chars, using OCR text"
+                            )
+                            result["text"] = ocr_text
+                            result["sections"] = ocr_result.get("sections", sections)
+                            result["metadata"]["ocr_fallback"] = True
+                            result["metadata"]["ocr_confidence"] = ocr_result.get("metadata", {}).get("confidence", 0.0)
+                    except Exception as ocr_error:
+                        logger.warning(f"EasyOCR fallback failed: {ocr_error}")
+            
+            return result
+            
+        except CircuitOpenError as e:
+            logger.warning(f"Granite VLM circuit breaker open: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Granite VLM parsing error: {e}")
+            raise
+    
+    def _convert_doctags_to_sections(
+        self,
+        doctags: str,
+        full_text: str,
+    ) -> List[Dict[str, Any]]:
+        """Convert DocTags to sections format for chunking."""
+        sections = []
+        
+        if doctags:
+            # Extract headings and content from DocTags
+            heading_pattern = r'<heading level="(\d+)">(.*?)</heading>'
+            
+            current_section = {"text": "", "title": "Introduction", "level": 0}
+            
+            # Split by headings
+            parts = re.split(r'(<heading level="\d+">.*?</heading>)', doctags, flags=re.DOTALL)
+            
+            for part in parts:
+                heading_match = re.match(heading_pattern, part, re.DOTALL)
+                if heading_match:
+                    # Save previous section
+                    if current_section["text"].strip():
+                        sections.append(current_section.copy())
+                    
+                    # Start new section
+                    level = int(heading_match.group(1))
+                    title = heading_match.group(2).strip()
+                    current_section = {
+                        "text": title,
+                        "title": title,
+                        "level": level,
+                        "section_path": title,
+                    }
+                else:
+                    # Add content to current section
+                    # Remove tags and add text
+                    text = re.sub(r'<[^>]+>', ' ', part)
+                    text = re.sub(r'\s+', ' ', text).strip()
+                    if text:
+                        current_section["text"] += " " + text
+            
+            # Add final section
+            if current_section["text"].strip():
+                sections.append(current_section)
+        
+        # If no sections found from DocTags, create from full text
+        if not sections and full_text:
+            # Split by paragraphs
+            paragraphs = [p.strip() for p in full_text.split('\n\n') if p.strip()]
+            for i, para in enumerate(paragraphs):
+                sections.append({
+                    "text": para,
+                    "title": f"Section {i + 1}",
+                    "level": 0,
+                    "section_path": f"Section {i + 1}",
+                })
+        
+        return sections
     
     def _parse_sync(self, file_path: str) -> Dict[str, Any]:
         """Synchronous Docling parsing."""

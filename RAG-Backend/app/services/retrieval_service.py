@@ -508,20 +508,16 @@ class RetrievalService:
             from app.services.reranker_service import get_reranker
             
             reranker = get_reranker()
-            texts = [c.chunk.text for c in chunks]
             
-            reranked = reranker.rerank(
+            # Rerank chunks (reranker updates scores in-place)
+            reranked_chunks, elapsed_ms = reranker.rerank(
                 query=query,
-                texts=texts,
+                chunks=chunks,
                 top_k=len(chunks)  # Keep all, just reorder
             )
             
-            # Update scores based on reranking
-            for i, (original_idx, score) in enumerate(reranked):
-                chunks[original_idx].rerank_score = score
-                chunks[original_idx].final_score = score
-            
-            return sorted(chunks, key=lambda c: c.final_score, reverse=True)
+            logger.debug(f"Reranking took {elapsed_ms}ms")
+            return reranked_chunks
             
         except Exception as e:
             logger.warning(f"Reranking failed, using original scores: {e}")

@@ -74,6 +74,7 @@ class OCRService:
         self.min_text_threshold = getattr(settings, 'OCR_MIN_TEXT_THRESHOLD', 50)
         self._reader = None
         self._available = None
+        self._tesseract_available = None
     
     def _get_reader(self):
         """Lazy-load EasyOCR reader (downloads models on first use)."""
@@ -112,9 +113,32 @@ class OCRService:
         
         return self._available
     
+    def _check_tesseract(self) -> bool:
+        """Check if pytesseract is installed and Tesseract binary is available."""
+        if self._tesseract_available is not None:
+            return self._tesseract_available
+        
+        try:
+            import pytesseract
+            # Try to get version to verify it's working
+            version = pytesseract.get_tesseract_version()
+            self._tesseract_available = True
+            logger.info(f"Tesseract OCR available: {version}")
+            return True
+        except ImportError:
+            self._tesseract_available = False
+            logger.debug("pytesseract not installed")
+            return False
+        except Exception as e:
+            self._tesseract_available = False
+            logger.debug(f"Tesseract binary not found: {e}")
+            return False
+    
     def is_available(self) -> bool:
-        """Check if OCR processing is enabled and available."""
-        return self.enabled and self._check_available()
+        """Check if OCR processing is enabled and available (either EasyOCR or Tesseract)."""
+        if not self.enabled:
+            return False
+        return self._check_available() or self._check_tesseract()
     
     def detect_ocr_need(
         self,
@@ -244,6 +268,14 @@ class OCRService:
         detail_level: int = 0,
     ) -> OCRResult:
         """Synchronous image OCR processing."""
+        # Try pytesseract first (faster, lighter)
+        if self._check_tesseract():
+            try:
+                return self._process_with_tesseract(image_input)
+            except Exception as e:
+                logger.warning(f"Tesseract OCR failed, trying EasyOCR: {e}")
+        
+        # Fallback to EasyOCR (more accurate)
         reader = self._get_reader()
         
         # Handle different input types
@@ -303,6 +335,54 @@ class OCRService:
         except Exception as e:
             logger.error(f"Image OCR failed: {e}")
             raise
+    
+    def _process_with_tesseract(self, image_input: Any) -> OCRResult:
+        """Process image using pytesseract (lightweight, fast)."""
+        import pytesseract
+        from PIL import Image
+        
+        # Load image
+        if isinstance(image_input, (str, Path)):
+            image = Image.open(image_input)
+        else:
+            image = image_input
+        
+        # Extract text with confidence data
+        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT, lang='eng')
+        
+        # Filter out low-confidence results and build text
+        texts = []
+        confidences = []
+        bboxes = []
+        
+        for i, conf in enumerate(data['conf']):
+            if conf > 0:  # Valid detection
+                text = data['text'][i].strip()
+                if text:
+                    texts.append(text)
+                    confidences.append(conf / 100.0)  # Normalize to 0-1
+                    bboxes.append({
+                        "coordinates": [
+                            [data['left'][i], data['top'][i]],
+                            [data['left'][i] + data['width'][i], data['top'][i]],
+                            [data['left'][i] + data['width'][i], data['top'][i] + data['height'][i]],
+                            [data['left'][i], data['top'][i] + data['height'][i]]
+                        ],
+                        "text": text,
+                        "confidence": conf / 100.0
+                    })
+        
+        full_text = " ".join(texts)
+        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
+        
+        logger.info(f"Tesseract extracted {len(texts)} text blocks, avg confidence: {avg_confidence:.2f}")
+        
+        return OCRResult(
+            text=full_text,
+            confidence=avg_confidence,
+            bounding_boxes=bboxes,
+            language='en',
+        )
     
     async def process_pdf_page(
         self,
@@ -407,16 +487,132 @@ class OCRService:
         language: str = "en",
     ) -> Dict[str, Any]:
         """Synchronous PDF OCR processing."""
+        # Try PyMuPDF first (no external dependencies)
+        try:
+            import fitz  # PyMuPDF
+            return self._ocr_pdf_with_pymupdf(file_path, language)
+        except ImportError:
+            logger.warning("PyMuPDF not available. Install with: pip install pymupdf")
+        except Exception as e:
+            logger.error(f"PyMuPDF OCR failed: {e}")
+        
+        # Fallback to pdf2image (requires poppler)
         try:
             from pdf2image import convert_from_path
+            return self._ocr_pdf_with_pdf2image(file_path, language)
         except ImportError:
-            raise RuntimeError(
-                "pdf2image not installed. Install with: pip install pdf2image"
+            error_msg = (
+                "No PDF converter available. OCR requires PyMuPDF (recommended) or pdf2image.\n"
+                "Install with: pip install pymupdf\n"
+                "OR install pdf2image + poppler: pip install pdf2image"
             )
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+        except Exception as e:
+            error_msg = f"PDF to image conversion failed: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+    
+    def _ocr_pdf_with_pymupdf(
+        self,
+        file_path: str,
+        language: str = "en",
+    ) -> Dict[str, Any]:
+        """OCR PDF using PyMuPDF for image extraction (no poppler required)."""
+        import fitz
+        from PIL import Image
+        import io
+        
+        doc = None
+        try:
+            logger.info(f"Converting PDF to images with PyMuPDF: {file_path}")
+            doc = fitz.open(file_path)
+            page_count = len(doc)
+            
+            # First, extract all page images to memory before closing doc
+            page_images = []
+            for page_num in range(page_count):
+                page = doc[page_num]
+                # Render page to pixmap at 200 DPI
+                pix = page.get_pixmap(dpi=200)
+                # Convert pixmap to PNG bytes
+                img_data = pix.tobytes("png")
+                page_images.append(img_data)
+            
+            # Close document before OCR (frees memory, allows file access)
+            doc.close()
+            doc = None
+            
+            # Now OCR each page image
+            page_texts = []
+            sections = []
+            total_confidence = 0.0
+            
+            for page_num, img_data in enumerate(page_images):
+                image = Image.open(io.BytesIO(img_data))
+                image_array = np.array(image)
+                
+                # OCR the page
+                result = self._process_image_sync(image_array, detail_level=1)
+                
+                page_texts.append(result.text)
+                total_confidence += result.confidence
+                
+                if result.text.strip():
+                    sections.append({
+                        "text": result.text,
+                        "title": f"Page {page_num + 1} (OCR)",
+                        "page_number": page_num + 1,
+                        "section_path": f"Page {page_num + 1}",
+                        "confidence": result.confidence,
+                    })
+                
+                logger.debug(
+                    f"OCR page {page_num + 1}: {len(result.text)} chars, "
+                    f"confidence: {result.confidence:.2f}"
+                )
+            
+            full_text = "\n\n".join(page_texts)
+            avg_confidence = total_confidence / page_count if page_count > 0 else 0.0
+            
+            logger.info(
+                f"OCR complete (PyMuPDF): {len(full_text)} chars from {page_count} pages, "
+                f"avg confidence: {avg_confidence:.2f}"
+            )
+            
+            return {
+                "text": full_text,
+                "sections": sections,
+                "page_count": page_count,
+                "metadata": {
+                    "parser": "pymupdf+ocr",
+                    "language": language,
+                    "dpi": 200,
+                    "confidence": avg_confidence,
+                },
+            }
+        except Exception as e:
+            logger.error(f"PyMuPDF OCR failed: {e}")
+            raise
+        finally:
+            # Ensure document is closed even on error
+            if doc is not None:
+                try:
+                    doc.close()
+                except:
+                    pass
+    
+    def _ocr_pdf_with_pdf2image(
+        self,
+        file_path: str,
+        language: str = "en",
+    ) -> Dict[str, Any]:
+        """OCR PDF using pdf2image (requires poppler)."""
+        from pdf2image import convert_from_path
         
         try:
             # Convert PDF pages to images
-            logger.info(f"Converting PDF to images for OCR: {file_path}")
+            logger.info(f"Converting PDF to images with pdf2image: {file_path}")
             images = convert_from_path(
                 file_path,
                 dpi=200,
@@ -453,7 +649,7 @@ class OCRService:
             avg_confidence = total_confidence / len(images) if images else 0.0
             
             logger.info(
-                f"OCR complete: {len(full_text)} chars from {len(images)} pages, "
+                f"OCR complete (pdf2image): {len(full_text)} chars from {len(images)} pages, "
                 f"avg confidence: {avg_confidence:.2f}"
             )
             
@@ -462,11 +658,10 @@ class OCRService:
                 "sections": sections,
                 "page_count": len(images),
                 "metadata": {
-                    "parser": "easyocr",
+                    "parser": "pdf2image+ocr",
                     "language": language,
                     "dpi": 200,
                     "confidence": avg_confidence,
-                    "gpu_accelerated": True,
                 },
             }
             

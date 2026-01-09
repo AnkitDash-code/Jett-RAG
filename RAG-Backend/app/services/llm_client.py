@@ -230,19 +230,12 @@ class PromptBuilder:
     Handles context formatting, citation instructions, and conversation history.
     """
     
-    SYSTEM_PROMPT = """You are a helpful AI assistant that answers questions based on the provided context documents. 
+    SYSTEM_PROMPT = """You are a helpful AI assistant. Answer questions clearly using the provided context when relevant.
 
-IMPORTANT RULES:
-1. ONLY answer based on the information provided in the context below
-2. If the context doesn't contain enough information to answer, say "I don't have enough information to answer this question based on the available documents."
-3. Always cite your sources using [Source: document_name, Page: X] format
-4. Be concise and accurate
-5. Do not make up information or hallucinate facts not present in the context
-
-CONTEXT DOCUMENTS:
+CONTEXT:
 {context}
 
-Now answer the user's question based on the above context."""
+Use the context above to answer when applicable, and cite sources with [Source: document_name]. If the context doesn't fully answer the question, provide a helpful response based on what's available."""
 
     def build_messages(
         self,
@@ -306,19 +299,22 @@ Now answer the user's question based on the above context."""
         self,
         response: str,
         chunks: list[Dict[str, Any]],
+        max_sources: int = 2,
     ) -> list[Dict[str, Any]]:
         """
         Extract and resolve citations from LLM response.
         Maps [Source: X] references to actual chunk metadata.
+        Returns only the top N most relevant sources.
         """
         citations = []
-        seen_docs = set()
         
-        # Return all chunks as sources with their text snippets
-        for chunk in chunks:
+        # Sort chunks by score (already reranked if reranker is enabled)
+        sorted_chunks = sorted(chunks, key=lambda c: c.get("score", 0), reverse=True)
+        
+        # Return only top max_sources as citations
+        for chunk in sorted_chunks[:max_sources]:
             doc_name = chunk.get("document_name", "")
             chunk_id = chunk.get("chunk_id", "")
-            # Include each chunk as a separate source (not just unique docs)
             citations.append({
                 "id": chunk_id,
                 "name": doc_name,

@@ -91,6 +91,22 @@ def test_tesseract():
         return False  # Not critical
 
 
+def test_easyocr():
+    """Test if EasyOCR model is cached."""
+    logger.info("🧪 Testing EasyOCR Model (for scanned documents)...")
+    try:
+        import easyocr
+        reader = easyocr.Reader(['en'], gpu=False, verbose=False)
+        logger.info(f"   ✅ EasyOCR model cached and working")
+        return True
+    except ImportError:
+        logger.info(f"   ⚠️  EasyOCR not installed (scanned docs will fail)")
+        return False
+    except Exception as e:
+        logger.info(f"   ❌ EasyOCR failed: {e}")
+        return False
+
+
 def test_rag_backend():
     """Test if RAG Backend is running."""
     logger.info("🧪 Testing RAG Backend connection...")
@@ -141,6 +157,7 @@ def main():
     model_results = {
         "Embedding Model": test_embedding_model(),
         "Reranker Model": test_reranker_model(),
+        "EasyOCR Model": test_easyocr(),
         "spaCy Model": test_spacy_model(),
         "Tesseract OCR": test_tesseract(),
     }
@@ -163,7 +180,9 @@ def main():
     
     logger.info("Models:")
     for name, status in model_results.items():
-        icon = "✅" if status else ("⚠️ " if name == "Tesseract OCR" else "❌")
+        # EasyOCR, Tesseract, and spaCy are optional
+        is_optional = name in ["Tesseract OCR", "spaCy Model", "EasyOCR Model"]
+        icon = "✅" if status else ("⚠️ " if is_optional else "❌")
         logger.info(f"  {icon} {name}")
     
     logger.info("")
@@ -174,10 +193,10 @@ def main():
     
     logger.info("")
     
-    # Check critical components (spaCy and Tesseract are optional)
+    # Check critical components (spaCy, Tesseract, and EasyOCR are optional)
     critical_models = all(
         status for name, status in model_results.items()
-        if name not in ["Tesseract OCR", "spaCy Model"]
+        if name not in ["Tesseract OCR", "spaCy Model", "EasyOCR Model"]
     )
     all_services = all(service_results.values())
     

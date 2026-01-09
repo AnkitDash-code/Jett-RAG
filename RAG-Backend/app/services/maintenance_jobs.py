@@ -58,7 +58,7 @@ async def handle_job_cleanup(
             
             await job_service.mark_completed(
                 job_id,
-                result={"jobs_cleaned": cleaned},
+                result_data={"jobs_cleaned": cleaned},
             )
             
             logger.info(f"Job cleanup complete: removed {cleaned} old jobs")
@@ -111,7 +111,7 @@ async def handle_graph_rebuild(
             
             await job_service.mark_completed(
                 job_id,
-                result={
+                result_data={
                     "community_count": result.community_count,
                     "algorithm": result.algorithm,
                     "processing_ms": result.processing_ms,
@@ -167,7 +167,7 @@ async def handle_vector_compaction(
             if not weaviate.is_available():
                 await job_service.mark_completed(
                     job_id,
-                    result={"message": "Vector store not available, skipping"},
+                    result_data={"message": "Vector store not available, skipping"},
                 )
                 return {"message": "Vector store not available"}
             
@@ -186,7 +186,7 @@ async def handle_vector_compaction(
             
             await job_service.mark_completed(
                 job_id,
-                result=stats,
+                result_data=stats,
             )
             
             logger.info(f"Vector compaction complete: {stats}")
@@ -219,7 +219,7 @@ async def handle_stream_cleanup(
             
             await job_service.mark_completed(
                 job_id,
-                result={"streams_cleaned": cleaned},
+                result_data={"streams_cleaned": cleaned},
             )
             
             logger.info(f"Stream cleanup complete: {cleaned} stale streams")
@@ -281,7 +281,7 @@ async def handle_orphan_cleanup(
             
             await job_service.mark_completed(
                 job_id,
-                result={"orphans_removed": orphan_count},
+                result_data={"orphans_removed": orphan_count},
             )
             
             logger.info(f"Orphan cleanup complete: {orphan_count} orphaned items")
@@ -339,7 +339,7 @@ async def handle_memory_importance_update(
             
             await job_service.mark_completed(
                 job_id,
-                result={
+                result_data={
                     "updated_count": result.updated_count,
                     "update_ms": result.update_ms,
                 },
@@ -412,7 +412,7 @@ async def handle_memory_archival(
             
             await job_service.mark_completed(
                 job_id,
-                result={
+                result_data={
                     "archived_count": result.archived_count,
                     "update_ms": result.update_ms,
                 },
@@ -548,7 +548,7 @@ class MaintenanceScheduler:
                 job_type=JobType.MAINTENANCE,
                 priority=0,  # Low priority
                 payload={"task_type": task_type},
-                created_by=uuid.uuid4(),  # System job
+                user_id=uuid.uuid4(),  # System job
             )
             
             # Enqueue task

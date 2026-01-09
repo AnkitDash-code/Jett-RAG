@@ -72,7 +72,7 @@ const TYPE_COLORS: Record<string, string> = {
 export default function GraphVisualizationPage() {
   const { user } = useAuth();
   const router = useRouter();
-  const graphRef = useRef<any>();
+  const graphRef = useRef<any>(null);
 
   const [graphData, setGraphData] = useState<GraphData>({
     nodes: [],
@@ -102,8 +102,7 @@ export default function GraphVisualizationPage() {
     try {
       setIsLoading(true);
       const response = await fetch(
-        `${
-          process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081/v1"
+        `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081/v1"
         }/admin/graph/visualization?limit=100&include_orphans=false`,
         {
           headers: {
@@ -232,62 +231,77 @@ export default function GraphVisualizationPage() {
   }
 
   return (
-    <main className="main-content graph-page">
-      <header>
-        <h2>Knowledge Graph</h2>
-        <p>Visualize entity relationships and communities.</p>
+    <main className="main-content">
+      <header style={{ marginBottom: "2rem" }}>
+        <h2 style={{ fontSize: "2rem", marginBottom: "0.5rem", background: "linear-gradient(to right, #fff, #9ca3af)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Knowledge Graph</h2>
+        <p style={{ color: "#9ca3af" }}>
+          Visualize entity relationships and communities.
+        </p>
       </header>
 
       {/* Controls */}
       <div
-        className="graph-controls"
         style={{
           display: "flex",
           gap: "1rem",
-          marginBottom: "1rem",
+          marginBottom: "2rem",
           flexWrap: "wrap",
           alignItems: "center",
+          background: "rgba(255, 255, 255, 0.03)",
+          padding: "1rem",
+          borderRadius: "1rem",
+          border: "1px solid rgba(255, 255, 255, 0.1)"
         }}
       >
-        <input
-          type="text"
-          placeholder="Search entities..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            border: "1px solid #374151",
-            backgroundColor: "#1f2937",
-            color: "#f9fafb",
-            minWidth: "200px",
-          }}
-        />
+        <div style={{ position: "relative", flex: "1 1 200px" }}>
+          <input
+            type="text"
+            placeholder="Search entities..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "0.625rem 1rem",
+              paddingLeft: "2.5rem",
+              borderRadius: "0.5rem",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              backgroundColor: "rgba(0, 0, 0, 0.2)",
+              color: "#f9fafb",
+              outline: "none",
+              transition: "border-color 0.2s"
+            }}
+          />
+          <span style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", color: "#9ca3af" }}>🔍</span>
+        </div>
 
         <select
           value={colorBy}
           onChange={(e) => setColorBy(e.target.value as "community" | "type")}
           style={{
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            border: "1px solid #374151",
-            backgroundColor: "#1f2937",
+            padding: "0.625rem 1rem",
+            borderRadius: "0.5rem",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
+            backgroundColor: "rgba(0, 0, 0, 0.2)",
             color: "#f9fafb",
+            cursor: "pointer",
+            outline: "none"
           }}
         >
-          <option value="type">Color by Type</option>
-          <option value="community">Color by Community</option>
+          <option value="type" style={{ background: "#1f2937" }}>Color by Type</option>
+          <option value="community" style={{ background: "#1f2937" }}>Color by Community</option>
         </select>
 
         <button
           onClick={() => graphRef.current?.zoomToFit(400)}
           style={{
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            backgroundColor: "#3b82f6",
-            color: "white",
-            border: "none",
+            padding: "0.625rem 1.25rem",
+            borderRadius: "0.5rem",
+            backgroundColor: "rgba(59, 130, 246, 0.1)",
+            color: "#60a5fa",
+            border: "1px solid rgba(59, 130, 246, 0.2)",
             cursor: "pointer",
+            fontWeight: 500,
+            transition: "all 0.2s"
           }}
         >
           Fit View
@@ -296,12 +310,14 @@ export default function GraphVisualizationPage() {
         <button
           onClick={fetchGraphData}
           style={{
-            padding: "0.5rem 1rem",
-            borderRadius: "0.375rem",
-            backgroundColor: "#374151",
-            color: "white",
-            border: "none",
+            padding: "0.625rem 1.25rem",
+            borderRadius: "0.5rem",
+            backgroundColor: "rgba(255, 255, 255, 0.05)",
+            color: "#e5e7eb",
+            border: "1px solid rgba(255, 255, 255, 0.1)",
             cursor: "pointer",
+            fontWeight: 500,
+            transition: "all 0.2s"
           }}
         >
           Refresh
@@ -309,34 +325,31 @@ export default function GraphVisualizationPage() {
       </div>
 
       {/* Stats */}
-      <div
-        className="graph-stats"
-        style={{
-          display: "flex",
-          gap: "1.5rem",
-          marginBottom: "1rem",
-        }}
-      >
-        <span>
-          <strong>{stats.entities}</strong> Entities
-        </span>
-        <span>
-          <strong>{stats.relationships}</strong> Relationships
-        </span>
-        <span>
-          <strong>{stats.communities}</strong> Communities
-        </span>
-      </div>
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
+        <div style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#9ca3af", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Entities</p>
+          <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{stats.entities}</p>
+        </div>
+        <div style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#9ca3af", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Relationships</p>
+          <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{stats.relationships}</p>
+        </div>
+        <div style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#9ca3af", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Communities</p>
+          <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{stats.communities}</p>
+        </div>
+      </section>
 
       {/* Graph Container */}
       <div
-        className="graph-container"
+        className="feature-card-modern"
         style={{
-          backgroundColor: "#111827",
-          borderRadius: "0.5rem",
-          border: "1px solid #374151",
+          backgroundColor: "#000000",
+          borderRadius: "1rem",
+          border: "1px solid rgba(255, 255, 255, 0.1)",
           overflow: "hidden",
           position: "relative",
+          minHeight: "500px"
         }}
       >
         {isLoading ? (
@@ -346,6 +359,7 @@ export default function GraphVisualizationPage() {
               justifyContent: "center",
               alignItems: "center",
               height: "500px",
+              color: "#9ca3af"
             }}
           >
             Loading graph...
@@ -354,70 +368,76 @@ export default function GraphVisualizationPage() {
           <ForceGraph2D
             ref={graphRef}
             graphData={graphData}
-            width={800}
-            height={500}
+            width={1200} // Approximate, allows responsiveness if parent clips
+            height={600}
             nodeLabel={(node: any) => `${node.name} (${node.type})`}
             nodeColor={(node: any) => getNodeColor(node)}
             nodeRelSize={6}
             nodeVal={(node: any) => node.val || 1}
-            linkColor={() => "#4b5563"}
+            linkColor={() => "#374151"}
             linkWidth={1.5}
             linkDirectionalParticles={2}
             linkDirectionalParticleWidth={2}
             onNodeClick={(node: any) => setSelectedNode(node)}
             cooldownTicks={100}
             onEngineStop={() => graphRef.current?.zoomToFit(400)}
+            backgroundColor="#000000"
           />
         )}
       </div>
 
       {/* Legend */}
       <div
-        className="graph-legend"
         style={{
           display: "flex",
           gap: "1rem",
-          marginTop: "1rem",
+          marginTop: "1.5rem",
           flexWrap: "wrap",
+          background: "rgba(255, 255, 255, 0.03)",
+          padding: "1rem",
+          borderRadius: "1rem",
+          border: "1px solid rgba(255, 255, 255, 0.05)"
         }}
       >
         {colorBy === "type"
           ? Object.entries(TYPE_COLORS).map(([type, color]) => (
+            <div
+              key={type}
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
               <div
-                key={type}
-                style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-              >
-                <div
-                  style={{
-                    width: "12px",
-                    height: "12px",
-                    borderRadius: "50%",
-                    backgroundColor: color,
-                  }}
-                />
-                <span style={{ fontSize: "0.875rem", color: "#9ca3af" }}>
-                  {type}
-                </span>
-              </div>
-            ))
+                style={{
+                  width: "12px",
+                  height: "12px",
+                  borderRadius: "50%",
+                  backgroundColor: color,
+                  boxShadow: `0 0 8px ${color}40`
+                }}
+              />
+              <span style={{ fontSize: "0.875rem", color: "#d1d5db" }}>
+                {type}
+              </span>
+            </div>
+          ))
           : COMMUNITY_COLORS.slice(0, stats.communities).map((color, i) => (
+            <div
+              key={i}
+              style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
+            >
               <div
-                key={i}
-                style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
-              >
-                <div
-                  style={{
-                    width: "12px",
-                    height: "12px",
-                    borderRadius: "50%",
-                    backgroundColor: color,
-                  }}
-                />
-                <span style={{ fontSize: "0.875rem", color: "#9ca3af" }}>
-                  Community {i + 1}
-                </span>
-              </div>
-            ))}
+                style={{
+                  width: "12px",
+                  height: "12px",
+                  borderRadius: "50%",
+                  backgroundColor: color,
+                  boxShadow: `0 0 8px ${color}40`
+                }}
+              />
+              <span style={{ fontSize: "0.875rem", color: "#d1d5db" }}>
+                Community {i + 1}
+              </span>
+            </div>
+          ))}
       </div>
 
       {/* Node Details Modal */}
@@ -429,7 +449,8 @@ export default function GraphVisualizationPage() {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
+            backgroundColor: "rgba(0, 0, 0, 0.7)",
+            backdropFilter: "blur(4px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -439,41 +460,51 @@ export default function GraphVisualizationPage() {
         >
           <div
             style={{
-              backgroundColor: "#1f2937",
-              borderRadius: "0.5rem",
-              padding: "1.5rem",
+              backgroundColor: "#0a0a0a",
+              borderRadius: "1rem",
+              padding: "2rem",
               maxWidth: "400px",
-              border: "1px solid #374151",
+              width: "100%",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.5)"
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 style={{ margin: "0 0 1rem 0", color: "#f9fafb" }}>
+            <h3 style={{ margin: "0 0 1rem 0", color: "#f9fafb", fontSize: "1.5rem" }}>
               {selectedNode.name}
             </h3>
-            <div style={{ color: "#9ca3af" }}>
-              <p>
-                <strong>Type:</strong> {selectedNode.type}
-              </p>
+            <div style={{ color: "#d1d5db", display: "grid", gap: "0.75rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.1)", paddingBottom: "0.5rem" }}>
+                <span style={{ color: "#9ca3af" }}>Type</span>
+                <span style={{ fontWeight: 600, color: TYPE_COLORS[selectedNode.type] || "white" }}>{selectedNode.type}</span>
+              </div>
               {selectedNode.community !== undefined && (
-                <p>
-                  <strong>Community:</strong> {selectedNode.community + 1}
-                </p>
+                <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(255,255,255,0.1)", paddingBottom: "0.5rem" }}>
+                  <span style={{ color: "#9ca3af" }}>Community</span>
+                  <span>{selectedNode.community + 1}</span>
+                </div>
               )}
-              <p>
-                <strong>Connections:</strong> {selectedNode.val || 0}
-              </p>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "#9ca3af" }}>Connections</span>
+                <span>{selectedNode.val || 0}</span>
+              </div>
             </div>
             <button
               onClick={() => setSelectedNode(null)}
               style={{
-                marginTop: "1rem",
-                padding: "0.5rem 1rem",
-                borderRadius: "0.375rem",
+                marginTop: "1.5rem",
+                width: "100%",
+                padding: "0.75rem",
+                borderRadius: "0.5rem",
                 backgroundColor: "#374151",
                 color: "white",
                 border: "none",
                 cursor: "pointer",
+                fontWeight: 600,
+                transition: "background 0.2s"
               }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#4b5563"}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "#374151"}
             >
               Close
             </button>

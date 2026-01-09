@@ -24,6 +24,12 @@ aiofiles>=23.2.0
 pdfplumber>=0.10.0
 python-docx>=1.1.0
 
+# Advanced Document Parsing (Phase 8 - Docling + Granite VLM)
+docling>=2.67.0
+docling-core>=2.0.0
+langchain-text-splitters>=0.0.1
+langchain-core>=0.1.0
+
 # Embeddings & NLP
 sentence-transformers>=2.2.0
 torch>=2.1.0
@@ -71,7 +77,8 @@ pytest-cov>=4.1.0
 # OCR Dependencies (Optional)
 pytesseract>=0.3.10
 Pillow>=10.0.0
+PyMuPDF>=1.23.0  # PDF rendering for OCR (no poppler needed)
 
 # Optional: EasyOCR (GPU-accelerated OCR using existing PyTorch)
-# easyocr>=1.7.0
-# pdf2image>=1.16.0  # Also needs poppler-utils installed on system
+easyocr>=1.7.0
+# pdf2image>=1.16.0  # Fallback PDF converter (requires poppler-utils installed on system)

@@ -118,6 +118,7 @@ class JobService:
         total_steps: int = 1,
         estimated_duration_seconds: Optional[int] = None,
         max_attempts: int = 3,
+        payload: Optional[Dict[str, Any]] = None,
     ) -> Job:
         """
         Create a new job.
@@ -136,6 +137,7 @@ class JobService:
             total_steps=total_steps,
             estimated_duration_seconds=estimated_duration_seconds,
             max_attempts=max_attempts,
+            payload=payload,
         )
         
         self.db.add(job)
@@ -442,7 +444,22 @@ class JobService:
         
         self.db.add(checkpoint)
         await self.db.commit()
-        await self.db.refresh(checkpoint)
+        
+        # Refresh with error handling for detached instances
+        try:
+            await self.db.refresh(checkpoint)
+        except Exception as e:
+            logger.debug(f"Could not refresh checkpoint (not critical): {e}")
+            # Re-fetch from DB if refresh fails
+            from sqlmodel import select
+            stmt = select(IngestionCheckpoint).where(
+                IngestionCheckpoint.job_id == job_id,
+                IngestionCheckpoint.step_name == step_name
+            )
+            result = await self.db.execute(stmt)
+            refreshed = result.scalars().first()
+            if refreshed:
+                checkpoint = refreshed
         
         logger.debug(f"Saved checkpoint: job={job_id}, step={step_name}")
         return checkpoint

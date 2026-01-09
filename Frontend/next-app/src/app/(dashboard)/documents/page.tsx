@@ -115,153 +115,191 @@ export default function DocumentsPage() {
   }
 
   return (
-    <main className="main-content documents-page">
-      <header>
-        <h2>Document Management</h2>
-        <p>Upload, manage, and monitor document indexing.</p>
+    <main className="main-content">
+      <header style={{ marginBottom: "2rem" }}>
+        <h2 style={{ fontSize: "2rem", marginBottom: "0.5rem", background: "linear-gradient(to right, #fff, #9ca3af)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Documents</h2>
+        <p style={{ color: "#9ca3af" }}>
+          Upload and manage your knowledge base sources.
+        </p>
       </header>
 
-      {/* Upload Section */}
-      <section className="upload-section">
-        <div
-          {...getRootProps()}
-          className={`upload-dropzone ${isDragActive ? "active" : ""} ${
-            isUploading ? "uploading" : ""
-          }`}
-        >
-          <input {...getInputProps()} />
-          {isUploading ? (
-            <>
-              <span className="upload-icon">⏳</span>
-              <p>Uploading...</p>
-            </>
-          ) : isDragActive ? (
-            <>
-              <span className="upload-icon">📥</span>
-              <p>Drop files here...</p>
-            </>
-          ) : (
-            <>
-              <span className="upload-icon">📁</span>
-              <p>Drag & drop files here, or click to select</p>
-              <small>Supports PDF, TXT, MD, DOCX</small>
-            </>
-          )}
+      {/* Stats Bar */}
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
+        <div style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#9ca3af", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Total Documents</p>
+          <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.length}</p>
+        </div>
+        <div style={{ background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#34d399", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Indexed</p>
+          <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.filter((d) => d.status === "indexed").length}</p>
+        </div>
+        <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#fbbf24", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Processing</p>
+          <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.filter((d) => d.status === "processing").length}</p>
+        </div>
+        <div style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
+          <p style={{ color: "#60a5fa", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Total Chunks</p>
+          <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.reduce((acc, d) => acc + d.chunk_count, 0)}</p>
         </div>
       </section>
 
-      {/* Stats Bar */}
-      <section className="stats-bar">
-        <div className="stat-item">
-          <span className="stat-value">{documents.length}</span>
-          <span className="stat-label">Total Documents</span>
-        </div>
-        <div className="stat-item">
-          <span className="stat-value">
-            {documents.filter((d) => d.status === "indexed").length}
-          </span>
-          <span className="stat-label">Indexed</span>
-        </div>
-        <div className="stat-item">
-          <span className="stat-value">
-            {documents.filter((d) => d.status === "processing").length}
-          </span>
-          <span className="stat-label">Processing</span>
-        </div>
-        <div className="stat-item">
-          <span className="stat-value">
-            {documents.reduce((acc, d) => acc + d.chunk_count, 0)}
-          </span>
-          <span className="stat-label">Total Chunks</span>
+      {/* Upload Section */}
+      <section style={{ marginBottom: "2rem" }}>
+        <div
+          {...getRootProps()}
+          style={{
+            border: isDragActive ? "2px dashed #3b82f6" : "2px dashed rgba(255, 255, 255, 0.1)",
+            borderRadius: "1rem",
+            padding: "3rem",
+            textAlign: "center",
+            background: isDragActive ? "rgba(59, 130, 246, 0.05)" : "rgba(0, 0, 0, 0.2)",
+            cursor: "pointer",
+            transition: "all 0.2s ease"
+          }}
+        >
+          <input {...getInputProps()} />
+          <div style={{ marginBottom: "1rem", display: "flex", justifyContent: "center" }}>
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke={isDragActive ? "#3b82f6" : "#6b7280"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+          </div>
+          <p style={{ color: "white", fontWeight: "500", marginBottom: "0.5rem" }}>
+            {isUploading ? "Uploading..." : isDragActive ? "Drop files here..." : "Click or drag files to upload"}
+          </p>
+          <p style={{ color: "#6b7280", fontSize: "0.875rem" }}>
+            Supports PDF, TXT, MD, DOCX (Max 10MB)
+          </p>
         </div>
       </section>
 
       {/* Filter & Document List */}
-      <section className="documents-section">
-        <div className="section-header">
-          <h3>All Documents</h3>
-          <div className="filter-buttons">
+      <section>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
+          <h3 style={{ fontSize: "1.25rem", fontWeight: "600", color: "white" }}>All Documents</h3>
+          <div style={{ display: "flex", gap: "0.5rem", background: "#1f2937", padding: "0.25rem", borderRadius: "0.5rem" }}>
             {(["all", "indexed", "processing", "error"] as const).map((f) => (
               <button
                 key={f}
-                className={`filter-btn ${filter === f ? "active" : ""}`}
                 onClick={() => setFilter(f)}
+                style={{
+                  padding: "0.375rem 0.75rem",
+                  borderRadius: "0.375rem",
+                  fontSize: "0.875rem",
+                  fontWeight: "500",
+                  textTransform: "capitalize",
+                  background: filter === f ? "#374151" : "transparent",
+                  color: filter === f ? "white" : "#9ca3af",
+                  border: "none",
+                  cursor: "pointer",
+                  transition: "all 0.2s"
+                }}
               >
-                {f.charAt(0).toUpperCase() + f.slice(1)}
+                {f}
               </button>
             ))}
           </div>
         </div>
 
         {isLoading ? (
-          <div className="loading-state">
-            <p>Loading documents...</p>
-          </div>
+          <div style={{ padding: "3rem", textAlign: "center", color: "#6b7280" }}>Loading documents...</div>
         ) : filteredDocuments.length === 0 ? (
-          <div className="empty-state">
-            <span className="empty-icon">📭</span>
-            <p>No documents found</p>
+          <div style={{ padding: "4rem", textAlign: "center", border: "1px dashed rgba(255, 255, 255, 0.1)", borderRadius: "1rem" }}>
+            <p style={{ color: "#9ca3af" }}>No documents found matching your filter.</p>
           </div>
         ) : (
-          <div className="documents-grid">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "1.5rem" }}>
             {filteredDocuments.map((doc) => (
-              <div key={doc.id} className={`document-card ${doc.status}`}>
-                <div className="doc-header">
-                  <span className="doc-status-icon">
-                    {getStatusIcon(doc.status)}
-                  </span>
-                  <span className={`doc-status-badge ${doc.status}`}>
+              <div
+                key={doc.id}
+                style={{
+                  background: "#0a0a0a",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  borderRadius: "1rem",
+                  padding: "1.5rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  transition: "transform 0.2s",
+                  position: "relative",
+                  overflow: "hidden"
+                }}
+                className="feature-card-modern"
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", marginBottom: "1rem" }}>
+                  <div style={{
+                    width: "40px",
+                    height: "40px",
+                    borderRadius: "8px",
+                    background: doc.status === 'indexed' ? "rgba(16, 185, 129, 0.1)" : doc.status === 'error' ? "rgba(239, 68, 68, 0.1)" : "rgba(245, 158, 11, 0.1)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: doc.status === 'indexed' ? "#10b981" : doc.status === 'error' ? "#ef4444" : "#f59e0b"
+                  }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                  </div>
+                  <span style={{
+                    fontSize: "0.75rem",
+                    padding: "0.25rem 0.5rem",
+                    borderRadius: "9999px",
+                    background: doc.status === 'indexed' ? "rgba(16, 185, 129, 0.1)" : doc.status === 'error' ? "rgba(239, 68, 68, 0.1)" : "rgba(245, 158, 11, 0.1)",
+                    color: doc.status === 'indexed' ? "#10b981" : doc.status === 'error' ? "#ef4444" : "#f59e0b"
+                  }}>
                     {doc.status}
                   </span>
                 </div>
-                <div className="doc-body">
-                  <h4 className="doc-title">{doc.title || doc.filename}</h4>
-                  <p className="doc-filename">
-                    {doc.original_filename || doc.filename}
-                  </p>
-                  <div className="doc-meta-grid">
-                    <div className="meta-item">
-                      <span className="meta-label">Size</span>
-                      <span className="meta-value">
-                        {formatFileSize(doc.file_size)}
-                      </span>
-                    </div>
-                    <div className="meta-item">
-                      <span className="meta-label">Chunks</span>
-                      <span className="meta-value">{doc.chunk_count}</span>
-                    </div>
-                    <div className="meta-item">
-                      <span className="meta-label">Pages</span>
-                      <span className="meta-value">
-                        {doc.page_count || "—"}
-                      </span>
-                    </div>
-                    <div className="meta-item">
-                      <span className="meta-label">Access</span>
-                      <span className="meta-value">{doc.access_level}</span>
-                    </div>
+
+                <h4 style={{ color: "white", fontSize: "1rem", fontWeight: "600", marginBottom: "0.25rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={doc.title || doc.filename}>
+                  {doc.title || doc.filename}
+                </h4>
+                <p style={{ color: "#6b7280", fontSize: "0.875rem", marginBottom: "1rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {doc.original_filename}
+                </p>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1rem" }}>
+                  <div>
+                    <p style={{ color: "#6b7280", fontSize: "0.75rem" }}>Size</p>
+                    <p style={{ color: "#d1d5db", fontSize: "0.875rem" }}>{formatFileSize(doc.file_size)}</p>
                   </div>
-                  <div className="doc-tags">
-                    {doc.tags.map((tag) => (
-                      <span key={tag} className="tag">
-                        {tag}
-                      </span>
-                    ))}
+                  <div>
+                    <p style={{ color: "#6b7280", fontSize: "0.75rem" }}>Chunks</p>
+                    <p style={{ color: "#d1d5db", fontSize: "0.875rem" }}>{doc.chunk_count}</p>
+                  </div>
+                  <div>
+                    <p style={{ color: "#6b7280", fontSize: "0.75rem" }}>Date</p>
+                    <p style={{ color: "#d1d5db", fontSize: "0.875rem" }}>{new Date(doc.created_at).toLocaleDateString()}</p>
                   </div>
                 </div>
-                <div className="doc-footer">
-                  <span className="doc-date">
-                    {new Date(doc.created_at).toLocaleDateString()}
-                  </span>
-                  <div className="doc-actions">
-                    <button
-                      onClick={() => handleDelete(doc.id, doc.filename)}
-                      className="btn btn-sm btn-danger"
-                      title="Delete document"
-                    >
-                      🗑️ Delete
-                    </button>
-                  </div>
+
+                <div style={{ marginTop: "auto", borderTop: "1px solid rgba(255, 255, 255, 0.05)", paddingTop: "1rem", display: "flex", justifyContent: "flex-end" }}>
+                  <button
+                    onClick={() => handleDelete(doc.id, doc.filename)}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      color: "#ef4444",
+                      fontSize: "0.875rem",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.25rem",
+                      padding: "0.25rem 0.5rem",
+                      borderRadius: "0.25rem",
+                      transition: "background 0.2s"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = "rgba(239, 68, 68, 0.1)"}
+                    onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                    Delete
+                  </button>
                 </div>
               </div>
             ))}

@@ -64,203 +64,198 @@ export default function Settings() {
   };
 
   return (
-    <main className="main-content settings-page">
-      <header>
-        <h2>Settings</h2>
-        <p>Manage your account and preferences.</p>
+    <main className="main-content">
+      <header style={{ marginBottom: "2rem" }}>
+        <h2 style={{ fontSize: "2rem", marginBottom: "0.5rem", background: "linear-gradient(to right, #fff, #9ca3af)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Settings</h2>
+        <p style={{ color: "#9ca3af" }}>
+          Manage your account and preferences.
+        </p>
       </header>
 
-      {/* Profile Section */}
-      <section className="settings-section">
-        <h3>Profile Information</h3>
-        <p className="section-description">Update your personal information.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))", gap: "1.5rem" }}>
 
-        <div className="settings-form">
-          <div className="form-group">
-            <label>Email</label>
-            <input
-              type="email"
-              value={user?.email || ""}
-              disabled
-              className="form-input disabled"
-            />
-            <small>Email cannot be changed</small>
-          </div>
-
-          <div className="form-group">
-            <label>Full Name</label>
-            <input
-              type="text"
-              value={profile.name}
-              onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-              placeholder="Enter your name"
-              className="form-input"
-            />
-          </div>
-
-          <div className="form-group">
-            <label>Department</label>
-            <input
-              type="text"
-              value={profile.department}
-              onChange={(e) =>
-                setProfile({ ...profile, department: e.target.value })
-              }
-              placeholder="e.g., Engineering, Marketing"
-              className="form-input"
-            />
-          </div>
-
-          <button
-            onClick={handleSaveProfile}
-            disabled={isLoading}
-            className="btn btn-dark"
-          >
-            {isLoading ? "Saving..." : "Save Profile"}
-          </button>
-        </div>
-      </section>
-
-      {/* Preferences Section */}
-      <section className="settings-section">
-        <h3>Chat Preferences</h3>
-        <p className="section-description">Customize your chat experience.</p>
-
-        <div className="settings-options">
-          <div className="setting-item">
-            <div className="setting-info">
-              <label>Enable Streaming</label>
-              <small>Show AI responses as they are generated</small>
-            </div>
-            <label className="toggle-switch">
-              <input
-                type="checkbox"
-                checked={preferences.streamingEnabled}
-                onChange={(e) =>
-                  handlePreferenceChange("streamingEnabled", e.target.checked)
-                }
-              />
-              <span className="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div className="setting-item">
-            <div className="setting-info">
-              <label>Notifications</label>
-              <small>Receive notifications for important updates</small>
-            </div>
-            <label className="toggle-switch">
-              <input
-                type="checkbox"
-                checked={preferences.notifications}
-                onChange={(e) =>
-                  handlePreferenceChange("notifications", e.target.checked)
-                }
-              />
-              <span className="toggle-slider"></span>
-            </label>
-          </div>
-
-          <div className="setting-item">
-            <div className="setting-info">
-              <label>Response Temperature</label>
-              <small>Controls creativity (0 = precise, 1 = creative)</small>
-            </div>
-            <div className="slider-container">
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={preferences.defaultTemperature}
-                onChange={(e) =>
-                  handlePreferenceChange(
-                    "defaultTemperature",
-                    parseFloat(e.target.value)
-                  )
-                }
-                className="range-slider"
-              />
-              <span className="slider-value">
-                {preferences.defaultTemperature}
+        {/* Left Column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+          {/* Profile Section */}
+          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.5rem" }}>
+              <span style={{ padding: "0.5rem", borderRadius: "0.5rem", background: "rgba(59, 130, 246, 0.1)", color: "#3b82f6" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
               </span>
+              <div>
+                <h3 style={{ fontSize: "1.125rem", fontWeight: "600", color: "white" }}>Profile Information</h3>
+                <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Update your personal details</p>
+              </div>
             </div>
-          </div>
 
-          <div className="setting-item">
-            <div className="setting-info">
-              <label>Max Response Length</label>
-              <small>Maximum tokens in AI responses</small>
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+              <div>
+                <label style={{ display: "block", color: "#d1d5db", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Email Address</label>
+                <div style={{ position: "relative" }}>
+                  <input
+                    type="email"
+                    value={user?.email || ""}
+                    disabled
+                    style={{ width: "100%", padding: "0.75rem", paddingLeft: "2.5rem", background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "0.5rem", color: "#6b7280", cursor: "not-allowed" }}
+                  />
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)" }}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: "#d1d5db", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Full Name</label>
+                <input
+                  type="text"
+                  value={profile.name}
+                  onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                  placeholder="Enter your name"
+                  style={{ width: "100%", padding: "0.75rem", background: "#1f2937", border: "1px solid #374151", borderRadius: "0.5rem", color: "white", outline: "none" }}
+                  onFocus={(e) => e.target.style.borderColor = "#3b82f6"}
+                  onBlur={(e) => e.target.style.borderColor = "#374151"}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: "#d1d5db", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Department</label>
+                <input
+                  type="text"
+                  value={profile.department}
+                  onChange={(e) => setProfile({ ...profile, department: e.target.value })}
+                  placeholder="e.g., Engineering"
+                  style={{ width: "100%", padding: "0.75rem", background: "#1f2937", border: "1px solid #374151", borderRadius: "0.5rem", color: "white", outline: "none" }}
+                  onFocus={(e) => e.target.style.borderColor = "#3b82f6"}
+                  onBlur={(e) => e.target.style.borderColor = "#374151"}
+                />
+              </div>
+
+              <button
+                onClick={handleSaveProfile}
+                disabled={isLoading}
+                style={{
+                  marginTop: "0.5rem",
+                  width: "100%",
+                  padding: "0.75rem",
+                  borderRadius: "0.5rem",
+                  background: "#3b82f6",
+                  color: "white",
+                  border: "none",
+                  fontWeight: "600",
+                  cursor: isLoading ? "not-allowed" : "pointer",
+                  opacity: isLoading ? 0.7 : 1,
+                  transition: "background 0.2s"
+                }}
+              >
+                {isLoading ? "Saving..." : "Save Changes"}
+              </button>
             </div>
-            <select
-              value={preferences.maxTokens}
-              onChange={(e) =>
-                handlePreferenceChange("maxTokens", parseInt(e.target.value))
-              }
-              className="form-select"
-            >
-              <option value={512}>Short (512)</option>
-              <option value={1024}>Medium (1024)</option>
-              <option value={2048}>Long (2048)</option>
-              <option value={4096}>Extended (4096)</option>
-            </select>
-          </div>
-        </div>
-      </section>
+          </section>
 
-      {/* Theme Section */}
-      <section className="settings-section">
-        <h3>Appearance</h3>
-        <p className="section-description">Choose your preferred theme.</p>
-
-        <div className="theme-options">
-          {(["light", "dark", "system"] as const).map((theme) => (
-            <button
-              key={theme}
-              onClick={() => handlePreferenceChange("theme", theme)}
-              className={`theme-button ${
-                preferences.theme === theme ? "active" : ""
-              }`}
-            >
-              <span className="theme-icon">
-                {theme === "light" ? "☀️" : theme === "dark" ? "🌙" : "💻"}
+          {/* Account Info */}
+          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.5rem" }}>
+              <span style={{ padding: "0.5rem", borderRadius: "0.5rem", background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
               </span>
-              <span className="theme-label">
-                {theme.charAt(0).toUpperCase() + theme.slice(1)}
-              </span>
-            </button>
-          ))}
-        </div>
-      </section>
+              <div>
+                <h3 style={{ fontSize: "1.125rem", fontWeight: "600", color: "white" }}>Account Status</h3>
+                <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Your subscription and role details</p>
+              </div>
+            </div>
 
-      {/* Account Info */}
-      <section className="settings-section account-info">
-        <h3>Account Information</h3>
-        <div className="info-grid">
-          <div className="info-item">
-            <label>Account Type</label>
-            <span className={`badge ${user?.role}`}>
-              {user?.role || "user"}
-            </span>
-          </div>
-          <div className="info-item">
-            <label>Member Since</label>
-            <span>
-              {user?.created_at
-                ? new Date(user.created_at).toLocaleDateString()
-                : "—"}
-            </span>
-          </div>
-          <div className="info-item">
-            <label>Last Login</label>
-            <span>
-              {user?.last_login_at
-                ? new Date(user.last_login_at).toLocaleDateString()
-                : "—"}
-            </span>
-          </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "1rem" }}>
+              <div style={{ padding: "1rem", background: "rgba(255, 255, 255, 0.03)", borderRadius: "0.5rem", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
+                <span style={{ color: "#9ca3af", fontSize: "0.75rem", display: "block", marginBottom: "0.25rem" }}>Role</span>
+                <span style={{ color: "white", fontWeight: "600", textTransform: "capitalize" }}>{user?.role || "user"}</span>
+              </div>
+              <div style={{ padding: "1rem", background: "rgba(255, 255, 255, 0.03)", borderRadius: "0.5rem", border: "1px solid rgba(255, 255, 255, 0.05)" }}>
+                <span style={{ color: "#9ca3af", fontSize: "0.75rem", display: "block", marginBottom: "0.25rem" }}>Member Since</span>
+                <span style={{ color: "white", fontWeight: "600" }}>{user?.created_at ? new Date(user.created_at).toLocaleDateString() : "—"}</span>
+              </div>
+            </div>
+          </section>
         </div>
-      </section>
+
+        {/* Right Column */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+          {/* Chat Preferences */}
+          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.5rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.5rem" }}>
+              <span style={{ padding: "0.5rem", borderRadius: "0.5rem", background: "rgba(245, 158, 11, 0.1)", color: "#f59e0b" }}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              </span>
+              <div>
+                <h3 style={{ fontSize: "1.125rem", fontWeight: "600", color: "white" }}>Chat Preferences</h3>
+                <p style={{ color: "#9ca3af", fontSize: "0.875rem" }}>Customize model behavior</p>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <label style={{ display: "block", color: "white", fontWeight: "500" }}>Enable Streaming</label>
+                  <small style={{ color: "#9ca3af" }}>Show AI responses as they are generated</small>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={preferences.streamingEnabled}
+                  onChange={(e) => handlePreferenceChange("streamingEnabled", e.target.checked)}
+                  style={{ accentColor: "#3b82f6", width: "1.25rem", height: "1.25rem" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <label style={{ display: "block", color: "white", fontWeight: "500" }}>Notifications</label>
+                  <small style={{ color: "#9ca3af" }}>Receive alerts for updates</small>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={preferences.notifications}
+                  onChange={(e) => handlePreferenceChange("notifications", e.target.checked)}
+                  style={{ accentColor: "#3b82f6", width: "1.25rem", height: "1.25rem" }}
+                />
+              </div>
+
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.5rem" }}>
+                  <label style={{ color: "#d1d5db", fontSize: "0.875rem" }}>Creativity (Temperature)</label>
+                  <span style={{ color: "#3b82f6", fontWeight: "600", fontSize: "0.875rem" }}>{preferences.defaultTemperature}</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  value={preferences.defaultTemperature}
+                  onChange={(e) => handlePreferenceChange("defaultTemperature", parseFloat(e.target.value))}
+                  style={{ width: "100%", accentColor: "#3b82f6" }}
+                />
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: "0.25rem" }}>
+                  <small style={{ color: "#6b7280", fontSize: "0.75rem" }}>Precise</small>
+                  <small style={{ color: "#6b7280", fontSize: "0.75rem" }}>Creative</small>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", color: "#d1d5db", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Max Response Length</label>
+                <select
+                  value={preferences.maxTokens}
+                  onChange={(e) => handlePreferenceChange("maxTokens", parseInt(e.target.value))}
+                  style={{ width: "100%", padding: "0.75rem", background: "#1f2937", border: "1px solid #374151", borderRadius: "0.5rem", color: "white", outline: "none" }}
+                >
+                  <option value={512}>Short (512 tokens)</option>
+                  <option value={1024}>Medium (1024 tokens)</option>
+                  <option value={2048}>Long (2048 tokens)</option>
+                  <option value={4096}>Extended (4096 tokens)</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+
+        </div>
+
+      </div>
     </main>
   );
 }

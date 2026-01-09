@@ -771,89 +771,105 @@ async def get_graph_visualization(
     - stats: Summary statistics
     """
     from sqlalchemy import select, func, or_
+    from sqlalchemy.exc import OperationalError
     from app.models.graph import Entity, EntityType, EntityRelationship, CommunityMembership
     
-    # Build entity query
-    entity_query = select(Entity).order_by(Entity.relationship_count.desc())
-    
-    if entity_type:
-        try:
-            etype = EntityType(entity_type.lower())
-            entity_query = entity_query.where(Entity.entity_type == etype)
-        except ValueError:
-            pass
-    
-    if not include_orphans:
-        entity_query = entity_query.where(Entity.relationship_count > 0)
-    
-    entity_query = entity_query.limit(limit)
-    
-    result = await db.execute(entity_query)
-    entities = list(result.scalars().all())
-    entity_ids = [e.id for e in entities]
-    
-    # Get community memberships
-    comm_memberships = {}
-    if entity_ids:
-        comm_result = await db.execute(
-            select(CommunityMembership).where(
-                CommunityMembership.entity_id.in_(entity_ids)
+    try:
+        # Build entity query
+        entity_query = select(Entity).order_by(Entity.relationship_count.desc())
+        
+        if entity_type:
+            try:
+                etype = EntityType(entity_type.lower())
+                entity_query = entity_query.where(Entity.entity_type == etype)
+            except ValueError:
+                pass
+        
+        if not include_orphans:
+            entity_query = entity_query.where(Entity.relationship_count > 0)
+        
+        entity_query = entity_query.limit(limit)
+        
+        result = await db.execute(entity_query)
+        entities = list(result.scalars().all())
+        entity_ids = [e.id for e in entities]
+        
+        # Get community memberships
+        comm_memberships = {}
+        if entity_ids:
+            comm_result = await db.execute(
+                select(CommunityMembership).where(
+                    CommunityMembership.entity_id.in_(entity_ids)
+                )
             )
-        )
-        for cm in comm_result.scalars().all():
-            comm_memberships[cm.entity_id] = cm.community_id
-    
-    # Get relationships between these entities
-    relationships = []
-    if entity_ids:
-        rel_query = select(EntityRelationship).where(
-            or_(
-                EntityRelationship.source_entity_id.in_(entity_ids),
-                EntityRelationship.target_entity_id.in_(entity_ids),
+            for cm in comm_result.scalars().all():
+                comm_memberships[cm.entity_id] = cm.community_id
+        
+        # Get relationships between these entities
+        relationships = []
+        if entity_ids:
+            rel_query = select(EntityRelationship).where(
+                or_(
+                    EntityRelationship.source_entity_id.in_(entity_ids),
+                    EntityRelationship.target_entity_id.in_(entity_ids),
+                )
             )
-        )
-        rel_result = await db.execute(rel_query)
-        relationships = list(rel_result.scalars().all())
-    
-    # Filter to only relationships where both ends are in our entity set
-    entity_id_set = set(entity_ids)
-    valid_relationships = [
-        r for r in relationships
-        if r.source_entity_id in entity_id_set and r.target_entity_id in entity_id_set
-    ]
-    
-    # Get unique community count
-    unique_communities = set(str(c) for c in comm_memberships.values() if c)
-    
-    return {
-        "entities": [
-            {
-                "id": str(e.id),
-                "name": e.name,
-                "type": e.entity_type.value.upper(),
-                "community_id": str(comm_memberships.get(e.id)) if comm_memberships.get(e.id) else None,
-                "connection_count": e.relationship_count,
-                "mention_count": e.mention_count,
-                "centrality": round(e.centrality_score, 4),
+            rel_result = await db.execute(rel_query)
+            relationships = list(rel_result.scalars().all())
+        
+        # Filter to only relationships where both ends are in our entity set
+        entity_id_set = set(entity_ids)
+        valid_relationships = [
+            r for r in relationships
+            if r.source_entity_id in entity_id_set and r.target_entity_id in entity_id_set
+        ]
+        
+        # Get unique community count
+        unique_communities = set(str(c) for c in comm_memberships.values() if c)
+        
+        return {
+            "entities": [
+                {
+                    "id": str(e.id),
+                    "name": e.name,
+                    "type": e.entity_type.value.upper(),
+                    "community_id": str(comm_memberships.get(e.id)) if comm_memberships.get(e.id) else None,
+                    "connection_count": e.relationship_count,
+                    "mention_count": e.mention_count,
+                    "centrality": round(e.centrality_score, 4),
+                }
+                for e in entities
+            ],
+            "relationships": [
+                {
+                    "source_id": str(r.source_entity_id),
+                    "target_id": str(r.target_entity_id),
+                    "relationship_type": r.relationship_type.value.upper(),
+                    "weight": r.weight,
+                    "confidence": r.confidence,
+                }
+                for r in valid_relationships
+            ],
+            "stats": {
+                "total_entities": len(entities),
+                "total_relationships": len(valid_relationships),
+                "communities": len(unique_communities),
             }
-            for e in entities
-        ],
-        "relationships": [
-            {
-                "source_id": str(r.source_entity_id),
-                "target_id": str(r.target_entity_id),
-                "relationship_type": r.relationship_type.value.upper(),
-                "weight": r.weight,
-                "confidence": r.confidence,
-            }
-            for r in valid_relationships
-        ],
-        "stats": {
-            "total_entities": len(entities),
-            "total_relationships": len(valid_relationships),
-            "communities": len(unique_communities),
         }
-    }
+        
+    except OperationalError as e:
+        # Handle case where graph tables don't exist yet (fresh database)
+        if "no such table" in str(e):
+            return {
+                "entities": [],
+                "relationships": [],
+                "stats": {
+                    "total_entities": 0,
+                    "total_relationships": 0,
+                    "communities": 0,
+                }
+            }
+        raise
 
 
 @router.post("/memory/consolidate/{user_id}")

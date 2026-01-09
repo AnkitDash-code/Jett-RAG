@@ -242,15 +242,18 @@ async def handle_document_ingestion(
             )
             
             # Update document status
-            document.status = DocumentStatusEnum.INDEXED
+            document.status = DocumentStatusEnum.INDEXED_LIGHT
             document.indexed_at = datetime.utcnow()
             await db.commit()
+            await db.refresh(document)  # Ensure status is persisted
             
             await job_service.save_checkpoint(
                 job_id=job_id,
                 document_id=document_id,
                 step_name=IngestionStep.FINALIZE,
             )
+            
+            logger.info(f"Document {document_id} status updated to INDEXED_LIGHT")
             
             # Calculate processing time
             end_time = datetime.utcnow()

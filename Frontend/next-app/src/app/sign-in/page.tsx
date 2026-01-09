@@ -69,7 +69,7 @@ export default function SignIn() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, ease: "easeOut" }}
         >
-          GraphRAG
+          Jett-RAG
         </motion.h1>
         <motion.form
           className="auth-form"

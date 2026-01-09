@@ -50,8 +50,7 @@ export function ChunkPreviewModal({
       setError(null);
       try {
         const response = await fetch(
-          `${
-            process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081/v1"
+          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081/v1"
           }/documents/chunks/${chunkId}/preview?include_context=true`,
           {
             headers: {

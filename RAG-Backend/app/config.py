@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: int = 384
     
     # GraphRAG Settings (rustworkx + SQLite)
-    ENABLE_GRAPH_RAG: bool = False
+    ENABLE_GRAPH_RAG: bool = True  # Enable knowledge graph extraction
     GRAPH_CACHE_TTL_SECONDS: int = 300  # 5 minutes
     GRAPH_MAX_HOPS: int = 1  # Max traversal depth
     GRAPH_SCORE_WEIGHT: float = 0.3  # Weight in final score (vector=0.4, rerank=0.3, graph=0.3)
@@ -96,6 +96,17 @@ class Settings(BaseSettings):
     ENABLE_OCR_DETECTION: bool = True
     OCR_MIN_TEXT_THRESHOLD: int = 100  # Chars below this triggers OCR
     
+    # Phase 8: Granite VLM Integration (via existing LLM API + Ollama)
+    # Your friend integrated Granite Docling 258M into the same API server
+    ENABLE_REMOTE_VLM: bool = True
+    GRANITE_API_URL: str = "http://192.168.1.10:8088"  # Granite Docling API on network
+    GRANITE_CONVERT_ENDPOINT: str = "/v1/convert"  # New endpoint added by friend
+    GRANITE_SERVER_TIMEOUT: int = 300  # 5 minutes for large documents (first run ~40s)
+    GRANITE_MAX_RETRIES: int = 3
+    GRANITE_MAX_FILE_SIZE_MB: int = 100  # Max file size for VLM processing
+    GRANITE_CIRCUIT_BREAKER_THRESHOLD: int = 5  # Failures before circuit opens
+    GRANITE_CIRCUIT_TIMEOUT: float = 60.0  # Circuit open duration (seconds)
+    
     # Phase 5: Stream Cancellation
     STREAM_TIMEOUT_SECONDS: int = 300  # Auto-cancel streams after this
     
@@ -113,13 +124,14 @@ class Settings(BaseSettings):
     # Retrieval Settings
     RETRIEVAL_TOP_K: int = 10
     RERANK_TOP_K: int = 5
+    MAX_SOURCES_DISPLAY: int = 2  # Number of sources to show in chat responses
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
     
     # Hybrid Search Settings
     HYBRID_ALPHA: float = 0.5  # Weight for vector vs BM25 (1.0 = pure vector, 0.0 = pure BM25)
     ENABLE_HYBRID_SEARCH: bool = True
-    ENABLE_CROSS_ENCODER: bool = True
+    ENABLE_CROSS_ENCODER: bool = False
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANK_CANDIDATES: int = 30  # Number of candidates to rerank
     
