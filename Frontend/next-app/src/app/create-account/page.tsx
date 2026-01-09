@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import RippleGrid from "@/components/RippleGrid";
 
 export default function CreateAccount() {
   const { signup, isLoading } = useAuth();
@@ -11,6 +12,22 @@ export default function CreateAccount() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Background component for consistency
+  const Background = () => (
+    <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
+      <RippleGrid
+        enableRainbow={false}
+        gridColor="#3b82f6"
+        rippleIntensity={0.1}
+        gridSize={10}
+        gridThickness={15}
+        mouseInteraction={true}
+        mouseInteractionRadius={1.2}
+        opacity={0.7}
+      />
+    </div>
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,9 +60,10 @@ export default function CreateAccount() {
   if (isLoading) {
     return (
       <div className="auth-body">
+        <Background />
         <div className="auth-box">
           <h1>GraphRAG</h1>
-          <p>Loading...</p>
+          <p style={{ color: "#9ca3af" }}>Loading...</p>
         </div>
       </div>
     );
@@ -53,6 +71,7 @@ export default function CreateAccount() {
 
   return (
     <div className="auth-body">
+      <Background />
       <div className="auth-box">
         <h1>GraphRAG</h1>
         <form className="auth-form" onSubmit={handleSubmit}>

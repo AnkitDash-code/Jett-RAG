@@ -1,0 +1,164 @@
+.pipeline-container {
+    display: flex;
+    flex-direction: row;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 6rem 2rem;
+    gap: 4rem;
+    position: relative;
+    color: white;
+}
+
+.pipeline-left {
+    flex: 1;
+    position: sticky;
+    top: 20%;
+    height: fit-content;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.pipeline-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6rem;
+    padding-bottom: 6rem;
+}
+
+.pipeline-pill {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 9999px;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #e5e7eb;
+    margin-bottom: 2rem;
+    width: fit-content;
+}
+
+.pipeline-heading {
+    font-size: 3.5rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(to bottom, #ffffff, #94a3b8);
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.pipeline-subheading {
+    font-size: 1.125rem;
+    line-height: 1.6;
+    color: #9ca3af;
+    max-width: 90%;
+}
+
+.pipeline-cta {
+    margin-top: 2rem;
+    display: inline-flex;
+    align-items: center;
+    color: #fff;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 12px 24px;
+    border-radius: 30px;
+    transition: all 0.3s ease;
+}
+
+.pipeline-cta:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: #fff;
+}
+
+.pipeline-card {
+    background: linear-gradient(145deg, #0f172a, #020617);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 24px;
+    padding: 3rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s ease, border-color 0.3s ease;
+    min-height: 400px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+.pipeline-card:hover {
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.card-step-number {
+    position: absolute;
+    top: 2rem;
+    left: 2rem;
+    font-family: monospace;
+    color: #3b82f6;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+}
+
+.card-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: white;
+    margin-bottom: 1rem;
+    z-index: 2;
+    position: relative;
+}
+
+.card-description {
+    font-size: 1.1rem;
+    color: #9ca3af;
+    line-height: 1.5;
+    z-index: 2;
+    position: relative;
+    max-width: 90%;
+}
+
+.card-visual {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    opacity: 0.5;
+    background: radial-gradient(circle at center, rgba(59, 130, 246, 0.15) 0%, transparent 60%);
+    pointer-events: none;
+}
+
+.card-decoration-node {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #3b82f6;
+    border-radius: 50%;
+    box-shadow: 0 0 15px #3b82f6;
+}
+
+@media (max-width: 900px) {
+    .pipeline-container {
+        flex-direction: column;
+    }
+
+    .pipeline-left {
+        position: relative;
+        top: 0;
+        margin-bottom: 3rem;
+        max-height: none;
+    }
+
+    .pipeline-heading {
+        font-size: 2.5rem;
+    }
+}
