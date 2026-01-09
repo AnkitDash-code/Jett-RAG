@@ -55,62 +55,65 @@ A full-stack **Retrieval-Augmented Generation (RAG)** system with real-time stre
 ### Advanced Capabilities
 
 - 🔎 **Search Suggestions** - Autocomplete with entities, documents, and recent queries
-- 📤 **Export/Import** - Conversation export (JSON/Markdown) and import
+- 📤 **Export/Import** - Conversation export (JSON/Markdown/TXT) with full import support
 - 🖼️ **OCR Processing** - Extract text from images using EasyOCR
 - 🏷️ **Entity Extraction** - Automatic extraction and linking of entities
-- 📊 **Chunk Preview** - View document chunks with context navigation
+- 📊 **Chunk Preview** - View document chunks with surrounding context and navigation
+- 🌐 **Distributed LLM** - Load balancing across multiple LLM instances via ngrok
+- 🔄 **Auto Failover** - Automatic retry with different LLM on failure
+- 💊 **Health Monitoring** - Continuous health checks of all LLM workers
+- 🎯 **Smart Routing** - Task-based routing (utility vs chat operations)
 
 ---
 
 ## 🏗 Architecture
 
+### Distributed Architecture with Ngrok Tunnels
+
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                           FRONTEND                                   │
-│                    Next.js 15 (Port 3000)                           │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐ │
-│  │    Chat     │  │  Dashboard  │  │   Admin     │  │  Analytics │ │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └─────┬──────┘ │
-└─────────┼────────────────┼────────────────┼───────────────┼─────────┘
-          │                │                │               │
-          └────────────────┴────────────────┴───────────────┘
-                                    │
-                                    ▼ HTTP/SSE
-┌─────────────────────────────────────────────────────────────────────┐
-│                         RAG-BACKEND                                  │
-│                    FastAPI (Port 8081)                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐ │
-│  │    Auth     │  │    Chat     │  │  Documents  │  │  Retrieval │ │
-│  │   Service   │  │   Service   │  │   Service   │  │   Service  │ │
-│  └─────────────┘  └──────┬──────┘  └──────┬──────┘  └─────┬──────┘ │
-│                          │                │               │         │
-│  ┌───────────────────────┴────────────────┴───────────────┘         │
-│  │                                                                   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  │   SQLite    │  │    FAISS    │  │  Sentence Transformers  │  │
-│  │  │  (Users,    │  │   Vector    │  │      (Embeddings)       │  │
-│  │  │   Chats)    │  │    Store    │  │                         │  │
-│  │  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└──┼──────────────────────────────────────────────────────────────────┘
-   │
-   ▼ HTTP Streaming
-┌─────────────────────────────────────────────────────────────────────┐
-│                         LLM-BACKEND                                  │
-│                    FastAPI (Port 8080)                              │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │              OpenAI-compatible API Wrapper                   │   │
-│  └──────────────────────────┬──────────────────────────────────┘   │
-└─────────────────────────────┼───────────────────────────────────────┘
-                              │
-                              ▼ HTTP
-┌─────────────────────────────────────────────────────────────────────┐
-│                         LLAMA.CPP                                    │
-│                    Server (Port 8000)                               │
-│  ┌─────────────────────────────────────────────────────────────┐   │
-│  │           Mistral-7B-Instruct (Q4_K_M Quantized)            │   │
-│  │                    GPU Accelerated (CUDA)                    │   │
-│  └─────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                         INTERNET (Ngrok)                             │
+│   https://orchestrator-12345.ngrok-free.app (Orchestrator)          │
+│   https://worker-llm-12345.ngrok-free.app (Worker LLM)              │
+└────────┬───────────────────────────────────────┬───────────────────┘
+         │                                       │
+         │ HTTPS (from anywhere)                 │
+         │                                       │
+┌────────▼─────────────────────────┐  ┌─────────▼──────────────────────┐
+│      DEVICE 1 (Orchestrator)     │  │      DEVICE 2 (Worker)         │
+│                                  │  │                                │
+│  ┌────────────────────────────┐  │  │  ┌──────────────────────────┐ │
+│  │   Frontend (Port 3000)     │  │  │  │  LLM Backend (8000)      │ │
+│  │   Next.js 15 Dashboard     │  │  │  │  + pyngrok (auto-tunnel) │ │
+│  └────────────────────────────┘  │  │  └──────────────────────────┘ │
+│                                  │  │                                │
+│  ┌────────────────────────────┐  │  │  ┌──────────────────────────┐ │
+│  │ RAG Backend (Port 8081)    │◄─┼──┤  │   Mistral-7B Model       │ │
+│  │ + pyngrok (auto-tunnel)    │  │  │  │   Q4_K_M Quantized       │ │
+│  │                            │  │  │  └──────────────────────────┘ │
+│  │ Components:                │  │  │                                │
+│  │ • LLM Router               │  │  └────────────────────────────────┘
+│  │ • Load Balancer            │  │
+│  │ • Health Monitor           │  │
+│  │ • GraphRAG Engine          │  │
+│  │ • Memory System            │  │
+│  │ • Vector Store (FAISS)     │  │
+│  │ • Knowledge Graph          │  │
+│  └────────┬───────────────────┘  │
+│           │                      │
+│  ┌────────▼───────────────────┐  │
+│  │ Local LLM Backend (8000)   │  │
+│  │ Mistral-7B (Primary)       │  │
+│  └────────────────────────────┘  │
+└──────────────────────────────────┘
+
+Key Features:
+• Round-robin load balancing between Device 1 & 2 LLMs
+• Automatic failover if one LLM becomes unavailable
+• Health monitoring every 60 seconds
+• Utility operations prefer local LLM for low latency
+• Chat generation distributes across all healthy LLMs
+• Public access via free ngrok static domains
 ```
 
 ---
@@ -131,17 +134,19 @@ A full-stack **Retrieval-Augmented Generation (RAG)** system with real-time stre
 
 ### RAG-Backend
 
-| Technology            | Purpose                        |
-| --------------------- | ------------------------------ |
-| FastAPI               | High-performance async API     |
-| SQLModel              | Async ORM with Pydantic        |
-| FAISS                 | Vector similarity search       |
-| Sentence Transformers | Text embeddings                |
-| LangChain             | Document processing & chunking |
-| PyMuPDF               | PDF parsing                    |
-| EasyOCR               | Image text extraction          |
-| python-docx           | Word document parsing          |
-| JWT                   | Authentication tokens          |
+| Technology            | Purpose                             |
+| --------------------- | ----------------------------------- |
+| FastAPI               | High-performance async API          |
+| SQLModel              | Async ORM with Pydantic             |
+| FAISS                 | Vector similarity search            |
+| Sentence Transformers | Text embeddings                     |
+| LangChain             | Document processing & chunking      |
+| PyMuPDF               | PDF parsing                         |
+| EasyOCR               | Image text extraction               |
+| python-docx           | Word document parsing               |
+| JWT                   | Authentication tokens               |
+| pyngrok               | Public tunnels for distributed LLMs |
+| rustworkx             | Knowledge graph operations          |
 
 ### LLM-Backend
 
@@ -229,15 +234,42 @@ DATABASE_URL=sqlite+aiosqlite:///./data/app.db
 SECRET_KEY=your-super-secret-key-change-in-production
 ACCESS_TOKEN_EXPIRE_MINUTES=30
 
-# LLM Backend
-LLM_API_BASE_URL=http://localhost:8080
+# Ngrok Configuration (for distributed setup)
+NGROK_AUTH_TOKEN=your_ngrok_authtoken_here
+NGROK_STATIC_DOMAIN=orchestrator-12345.ngrok-free.app
+PORT=8081
+
+# Primary LLM (Local)
+LLM_API_BASE_URL=http://localhost:8000
+
+# Worker LLMs (Remote via ngrok)
+WORKER_LLM_URLS=["https://worker-llm-12345.ngrok-free.app"]
+
+# LLM Routing
+LLM_ROUTING_STRATEGY=round_robin  # round_robin, random, or failover
+LLM_HEALTH_CHECK_INTERVAL=60
 
 # Embeddings
 EMBEDDING_MODEL=all-MiniLM-L6-v2
 EMBEDDING_DEVICE=cuda
 
+# RAG Features
+ENABLE_GRAPH_RAG=true
+ENABLE_MEMORY_SYSTEM=true
+
 # FAISS
 FAISS_INDEX_PATH=./data/faiss_index
+```
+
+### LLM-Backend (.env)
+
+```env
+# Ngrok Configuration
+NGROK_AUTH_TOKEN=your_ngrok_authtoken_here
+NGROK_STATIC_DOMAIN=worker-llm-12345.ngrok-free.app  # Optional
+
+# Server
+PORT=8000
 ```
 
 ### LLM-Backend
@@ -248,30 +280,27 @@ Configure `Settings.kcpps` for llama.cpp server settings.
 
 ## 🚀 Running the Application
 
-### 1. Start llama.cpp Server
+### Option A: Single Device (Local Development)
 
-```bash
-# In LLM-Backend folder
-./llama-server -m mistral-7b-instruct-v0.2.Q4_K_M.gguf -ngl 99 -c 4096 --port 8000
-```
-
-### 2. Start LLM-Backend
+#### 1. Start Local LLM
 
 ```bash
 cd LLM-Backend
+myenv\Scripts\activate  # On Windows
 python main.py
-# Runs on http://localhost:8080
+# Runs on http://localhost:8000
 ```
 
-### 3. Start RAG-Backend
+#### 2. Start RAG-Backend
 
 ```bash
 cd RAG-Backend
-python -m app.main
+myenv\Scripts\activate
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8081 --reload
 # Runs on http://localhost:8081
 ```
 
-### 4. Start Frontend
+#### 3. Start Frontend
 
 ```bash
 cd Frontend/next-app
@@ -279,14 +308,87 @@ npm run dev
 # Runs on http://localhost:3000
 ```
 
-### 5. Access the Application
+#### 4. Access Locally
 
-Open your browser and navigate to: **http://localhost:3000**
+Open browser: **http://localhost:3000**
+
+---
+
+### Option B: Distributed Setup (Multi-Device with Ngrok)
+
+#### Device 2 (Worker LLM):
+
+```bash
+cd LLM-Backend
+
+# 1. Configure ngrok in .env
+echo "NGROK_AUTH_TOKEN=your_token" > .env
+echo "PORT=8000" >> .env
+
+# 2. Start worker (automatically creates ngrok tunnel)
+myenv\Scripts\activate
+python main.py
+
+# 3. Copy the ngrok URL from output:
+# 🌐 LLM Worker is now publicly accessible at:
+#    https://worker-llm-12345.ngrok-free.app
+```
+
+#### Device 1 (Orchestrator):
+
+```bash
+cd RAG-Backend
+
+# 1. Configure .env with worker URL
+echo "NGROK_AUTH_TOKEN=your_token" > .env.orchestrator
+echo "WORKER_LLM_URLS=[\"https://worker-llm-12345.ngrok-free.app\"]" >> .env.orchestrator
+echo "LLM_API_BASE_URL=http://localhost:8000" >> .env.orchestrator
+echo "PORT=8081" >> .env.orchestrator
+
+# 2. Start local LLM
+cd ../LLM-Backend
+myenv\Scripts\activate
+python main.py  # Runs locally without ngrok
+
+# 3. Start RAG Backend (new terminal)
+cd ../RAG-Backend
+myenv\Scripts\activate
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8081
+
+# 4. Copy orchestrator URL from output:
+# 🌐 RAG Backend (Orchestrator) is publicly accessible at:
+#    https://orchestrator-12345.ngrok-free.app
+
+# 5. Update frontend .env.local
+cd ../Frontend/next-app
+echo "NEXT_PUBLIC_API_URL=https://orchestrator-12345.ngrok-free.app" > .env.local
+
+# 6. Start frontend
+npm run dev
+```
+
+#### Access from Anywhere:
+
+Open browser: **http://localhost:3000**  
+API accessible at: **https://orchestrator-12345.ngrok-free.app**
 
 **Default Admin Credentials:**
 
 - Email: `admin@graphrag.com`
 - Password: `admin123`
+
+---
+
+### Architecture Benefits
+
+| Feature              | Single Device | Distributed        |
+| -------------------- | ------------- | ------------------ |
+| **Setup Complexity** | Simple        | Moderate           |
+| **LLM Performance**  | 1x            | 2x (load balanced) |
+| **Remote Access**    | No            | Yes (via ngrok)    |
+| **Failover**         | No            | Yes (automatic)    |
+| **GPU Sharing**      | N/A           | Use multiple GPUs  |
+| **Best For**         | Development   | Production/Demo    |
 
 ---
 
@@ -338,11 +440,14 @@ Open your browser and navigate to: **http://localhost:3000**
 
 ### Knowledge Graph
 
-| Method | Endpoint                  | Description                |
-| ------ | ------------------------- | -------------------------- |
-| GET    | `/v1/graph/entities`      | List entities              |
-| GET    | `/v1/graph/relationships` | Get entity relationships   |
-| POST   | `/v1/graph/extract`       | Extract entities from text |
+| Method | Endpoint                        | Description                      |
+| ------ | ------------------------------- | -------------------------------- |
+| GET    | `/v1/graph/entities`            | List entities                    |
+| GET    | `/v1/graph/relationships`       | Get entity relationships         |
+| POST   | `/v1/graph/extract`             | Extract entities from text       |
+| GET    | `/v1/admin/graph/visualization` | Get graph data for visualization |
+| GET    | `/v1/admin/graph/stats`         | Get graph statistics             |
+| POST   | `/v1/admin/graph/reindex`       | Trigger graph reindexing         |
 
 ### Admin
 
@@ -375,7 +480,9 @@ Code/
 │       │   ├── components/       # React components
 │       │   │   ├── Sidebar.tsx   # Navigation sidebar
 │       │   │   ├── CitationCard.tsx # Citation display
-│       │   │   └── SearchBar.tsx # Autocomplete search
+│       │   │   ├── SearchBar.tsx # Autocomplete search
+│       │   │   ├── ChunkPreviewModal.tsx # Chunk context viewer
+│       │   │   └── ConversationExporter.tsx # Export/import chats
 │       │   ├── contexts/         # React contexts (Auth)
 │       │   ├── hooks/            # Custom hooks (useChatStream)
 │       │   ├── lib/              # Utilities (API client)
@@ -407,6 +514,7 @@ Code/
 │   │       ├── entity_service.py # Entity extraction
 │   │       ├── memory_service.py # Memory management
 │   │       ├── llm_client.py     # LLM API client
+│   │       ├── llm_router.py     # Multi-LLM load balancer
 │   │       └── retrieval_service.py# Vector search
 │   ├── tests/                    # Pytest test suite
 │   │   ├── test_ocr_service.py   # OCR tests
@@ -494,14 +602,19 @@ Code/
 
 #### Phase 8: Frontend Integration ✅
 
-- Chat interface with streaming
-- Document management UI
-- Admin dashboard with analytics
-- Knowledge graph viewer
-- Memory explorer
-- Search with autocomplete
-- Session management
-- Export/Import functionality
+- **Chat Interface** - Real-time streaming with SSE, citation cards, chunk preview
+- **Document Management** - Upload UI with drag-drop, OCR processing, status tracking
+- **Admin Dashboard** - User management, system statistics, analytics charts
+- **Knowledge Graph Viewer** - Force-directed interactive graph with D3.js
+- **Memory Explorer** - Episodic and semantic memory timeline
+- **Global Search** - Autocomplete search bar in dashboard header
+- **Session Management** - Device tracking, active sessions, logout all
+- **Export/Import** - Conversation export (JSON/Markdown/TXT) with import
+- **Chunk Preview Modal** - View chunks with surrounding context and entities
+- **Citation Cards** - Source display with relevance badges and actions
+- **LLM Router** - Load balancing and failover for distributed LLMs
+- **Ngrok Integration** - Automatic public tunnels with pyngrok
+- **Health Monitoring** - Real-time status of all LLM workers
 
 ---
 
@@ -528,6 +641,61 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 3. Commit your changes (`git commit -m 'Add amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+---
+
+## 🌐 Distributed Setup Guide
+
+### Getting Ngrok Static Domains (Free)
+
+1. Sign up at https://ngrok.com
+2. Get your auth token from https://dashboard.ngrok.com/get-started/your-authtoken
+3. Go to https://dashboard.ngrok.com/domains
+4. Click "Create Domain" (1 free static domain per account)
+5. You'll get a domain like: `your-name-12345.ngrok-free.app`
+
+### Load Balancing Strategies
+
+**Round Robin** (Default)
+
+- Distributes requests evenly across all LLMs
+- Best for: Equal hardware on all devices
+
+**Random**
+
+- Randomly selects an LLM for each request
+- Best for: Simple load distribution
+
+**Failover**
+
+- Uses primary LLM, workers only on failure
+- Best for: Primary device has better hardware
+
+### Adding More Workers
+
+```env
+# In orchestrator .env
+WORKER_LLM_URLS=[
+  "https://worker1.ngrok-free.app",
+  "https://worker2.ngrok-free.app",
+  "https://worker3.ngrok-free.app"
+]
+```
+
+### Health Monitoring
+
+Check LLM health status:
+
+```bash
+curl https://orchestrator-12345.ngrok-free.app/health
+```
+
+Response includes:
+
+- `primary`: Local LLM status
+- `workers`: Each worker's status
+- `healthy_count`: Number of working LLMs
+- `routing_strategy`: Current load balancing method
 
 ---
 
