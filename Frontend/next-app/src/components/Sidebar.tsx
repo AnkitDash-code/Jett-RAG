@@ -30,6 +30,9 @@ export default function Sidebar() {
         <Link href="/chat" className={isActive("/chat")}>
           <i className="icon">💬</i> Chat
         </Link>
+        <Link href="/memory" className={isActive("/memory")}>
+          <i className="icon">🧠</i> Memory
+        </Link>
         <Link href="/settings" className={isActive("/settings")}>
           <i className="icon">⚙️</i> Settings
         </Link>
@@ -48,6 +51,9 @@ export default function Sidebar() {
             </Link>
             <Link href="/documents" className={isActive("/documents")}>
               <i className="icon">📁</i> Documents
+            </Link>
+            <Link href="/admin/graph" className={isActive("/admin/graph")}>
+              <i className="icon">🔗</i> Knowledge Graph
             </Link>
           </>
         )}

@@ -6,6 +6,9 @@ import { toast } from "sonner";
 import { Message, Document } from "@/types";
 import { api } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
+import CitationCard from "@/components/CitationCard";
+import ChunkPreviewModal from "@/components/ChunkPreviewModal";
+import ConversationExporter from "@/components/ConversationExporter";
 import type {
   SourceCitation,
   DocumentResponse,
@@ -144,6 +147,7 @@ export default function Chat() {
   const [selectedSource, setSelectedSource] = useState<SourceCitation | null>(
     null
   );
+  const [previewChunkId, setPreviewChunkId] = useState<string | null>(null);
   const { streamChat, stopStream, isStreaming } = useChatStream();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -602,7 +606,39 @@ export default function Chat() {
         </div>
 
         {/* Right Panel: Chat Interface */}
-        <div className="panel question-panel" style={{ position: "relative" }}>
+        <div
+          className="panel question-panel"
+          style={{
+            position: "relative",
+            display: "flex",
+            flexDirection: "column",
+          }}
+        >
+          {/* Chat Header with Export */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              padding: "0.75rem 1rem",
+              borderBottom: "1px solid #374151",
+              backgroundColor: "#111827",
+            }}
+          >
+            <h3 style={{ margin: 0, fontSize: "1rem", color: "#f9fafb" }}>
+              💬 {conversationId ? `Conversation` : "New Chat"}
+            </h3>
+            <ConversationExporter
+              conversationId={conversationId || undefined}
+              messages={messages.filter((msg) => msg.content.length > 0)}
+              onImport={(importedMessages) => {
+                setMessages(importedMessages);
+                setConversationId(null);
+                toast.success("Conversation imported successfully");
+              }}
+            />
+          </div>
+
           {/* Messages Area */}
           <div
             className="answer-box"
@@ -619,73 +655,54 @@ export default function Chat() {
 
                   {/* Sources for Assistant Messages */}
                   {msg.sources && msg.sources.length > 0 && (
-                    <div className="message-sources">
-                      <h4>Sources:</h4>
-                      <ul>
+                    <div
+                      className="message-sources"
+                      style={{ marginTop: "0.75rem" }}
+                    >
+                      <h4
+                        style={{
+                          fontSize: "0.875rem",
+                          marginBottom: "0.5rem",
+                          color: "#9ca3af",
+                        }}
+                      >
+                        Sources ({msg.sources.length}):
+                      </h4>
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "0.5rem",
+                        }}
+                      >
                         {msg.sources.map((source, idx) => (
-                          <li
+                          <CitationCard
                             key={idx}
-                            onClick={() => setSelectedSource(source)}
-                            style={{
-                              cursor: "pointer",
-                              padding: "0.5rem",
-                              borderRadius: "0.25rem",
-                              transition: "background-color 0.2s",
+                            source={{
+                              id: source.chunk_id || `source-${idx}`,
+                              name: source.name,
+                              page: source.page,
+                              section: source.section,
+                              text: source.snippet,
+                              relevance: source.relevance as
+                                | "High"
+                                | "Medium"
+                                | "Low",
+                              document_id: source.document_id,
                             }}
-                            onMouseEnter={(e) =>
-                              (e.currentTarget.style.backgroundColor =
-                                "rgba(255,255,255,0.1)")
-                            }
-                            onMouseLeave={(e) =>
-                              (e.currentTarget.style.backgroundColor =
-                                "transparent")
-                            }
-                            title="Click to view source content"
-                          >
-                            <span>📄 {source.name}</span>
-                            {source.page && (
-                              <span
-                                style={{ fontSize: "0.75rem", opacity: 0.75 }}
-                              >
-                                {" "}
-                                (Page {source.page})
-                              </span>
-                            )}
-                            <span
-                              className="relevance-badge"
-                              style={{
-                                marginLeft: "0.5rem",
-                                fontSize: "0.75rem",
-                                backgroundColor:
-                                  source.relevance === "High"
-                                    ? "#d1fae5"
-                                    : source.relevance === "Medium"
-                                    ? "#fef3c7"
-                                    : "#f3f4f6",
-                                color:
-                                  source.relevance === "High"
-                                    ? "#065f46"
-                                    : source.relevance === "Medium"
-                                    ? "#92400e"
-                                    : "#374151",
-                                padding: "0.125rem 0.5rem",
-                                borderRadius: "9999px",
-                              }}
-                            >
-                              {source.relevance}
-                            </span>
-                            <span
-                              style={{
-                                marginLeft: "0.5rem",
-                                fontSize: "0.75rem",
-                                color: "#60a5fa",
-                              }}
-                            >
-                              🔍 View
-                            </span>
-                          </li>
+                            onPreview={(chunkId) => {
+                              // Use ChunkPreviewModal for detailed preview
+                              if (source.chunk_id) {
+                                setPreviewChunkId(source.chunk_id);
+                              } else {
+                                // Fallback to simple modal
+                                setSelectedSource(source);
+                              }
+                            }}
+                            compact={false}
+                          />
                         ))}
-                      </ul>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -748,6 +765,12 @@ export default function Chat() {
       <SourceModal
         source={selectedSource}
         onClose={() => setSelectedSource(null)}
+      />
+
+      {/* Chunk Preview Modal */}
+      <ChunkPreviewModal
+        chunkId={previewChunkId}
+        onClose={() => setPreviewChunkId(null)}
       />
     </main>
   );
