@@ -56,6 +56,26 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #374151;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4b5563;
+}
+
+
 /* --- Utility Classes --- */
 .btn {
     display: inline-flex;
@@ -692,11 +712,31 @@ body {
 
 .dashboard-content {
     margin-left: 260px;
-    background: linear-gradient(180deg, #050505 0%, #0f172a 40%, #1e3a8a 100%);
+    background:
+        url("data:image/svg+xml,%3Csvg width='56' height='99' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 16.5v33L28 66l28-16.5M28 66v33M0 16.5L28 0l28 16.5' fill='none' stroke='%233b82f6' stroke-width='1' stroke-opacity='0.1'/%3E%3C/svg%3E"),
+        linear-gradient(180deg, #050505 0%, #0f172a 40%, #1e3a8a 100%);
+    background-size: 56px auto, cover;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     flex: 1;
+    position: relative;
+}
+
+.dashboard-content::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: url("data:image/svg+xml,%3Csvg width='56' height='99' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 16.5v33L28 66l28-16.5M28 66v33M0 16.5L28 0l28 16.5' fill='none' stroke='%233b82f6' stroke-width='1.5' stroke-opacity='0.5'/%3E%3C/svg%3E");
+    background-size: 56px auto;
+    mask-image: radial-gradient(500px circle at var(--mouse-x) var(--mouse-y),
+            black 0%,
+            transparent 100%);
+    -webkit-mask-image: radial-gradient(500px circle at var(--mouse-x) var(--mouse-y),
+            black 0%,
+            transparent 100%);
 }
 
 .main-content {
@@ -727,9 +767,8 @@ body {
     display: grid;
     grid-template-columns: 300px 1fr;
     gap: 1.5rem;
-    min-height: calc(100vh - 200px);
-    height: auto;
-    align-items: start;
+    height: calc(100vh - 200px);
+    align-items: stretch;
 }
 
 @media (max-width: 1024px) {
@@ -740,11 +779,18 @@ body {
 }
 
 .upload-panel {
-    position: sticky;
-    top: 2rem;
-    max-height: calc(100vh - 4rem);
     display: flex;
     flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+}
+
+.question-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    margin-top: 0;
 }
 
 .panel {
@@ -836,11 +882,7 @@ body {
     margin-top: 0.25rem;
 }
 
-.question-panel {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-}
+
 
 .query-box {
     margin-bottom: 1.5rem;
@@ -901,10 +943,12 @@ body {
 
 .answer-box {
     clear: both;
-    margin-top: 1rem;
     flex-grow: 1;
-    overflow-y: visible;
+    overflow-y: auto;
     padding-right: 0.5rem;
+    margin-bottom: 1rem;
+    min-height: 0;
+    margin-top: 0;
 }
 
 .answer-box i {
@@ -2553,4 +2597,40 @@ body {
     to {
         opacity: 1;
     }
+}
+
+/* --- Dashboard Feature Cards --- */
+.feature-card-modern {
+    background: rgba(17, 24, 39, 0.7);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 1rem;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+    height: 100%;
+}
+
+.feature-card-modern:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    /* Deep shadow below */
+    border-color: rgba(59, 130, 246, 0.4);
+    background: rgba(17, 24, 39, 0.9);
+}
+
+.feature-card-modern h3 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: white;
+    margin-bottom: 0.5rem;
+}
+
+.feature-card-modern p {
+    color: #9ca3af;
+    font-size: 0.95rem;
+    line-height: 1.5;
 }

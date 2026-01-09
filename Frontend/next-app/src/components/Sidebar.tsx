@@ -27,12 +27,12 @@ export default function Sidebar() {
         <Image
           src="/jett-rag-logo.png"
           alt="Jett-RAG"
-          width={40}
-          height={40}
-          style={{ height: "auto", width: "auto", maxHeight: "40px" }}
+          width={48}
+          height={48}
+          style={{ height: "auto", width: "auto", maxHeight: "48px" }}
           priority
         />
-        <span style={{ fontSize: "1.25rem", fontWeight: "700", color: "white", letterSpacing: "-0.025em" }}>
+        <span style={{ fontSize: "1.5rem", fontWeight: "700", color: "white", letterSpacing: "-0.025em" }}>
           Jett-RAG
         </span>
       </Link>

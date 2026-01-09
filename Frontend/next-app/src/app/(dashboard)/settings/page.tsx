@@ -77,8 +77,8 @@ export default function Settings() {
         {/* Left Column */}
         <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
           {/* Profile Section */}
-          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.5rem" }}>
+          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "6rem 3rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "2rem" }}>
               <span style={{ padding: "0.5rem", borderRadius: "0.5rem", background: "rgba(59, 130, 246, 0.1)", color: "#3b82f6" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
               </span>
@@ -132,7 +132,7 @@ export default function Settings() {
                 onClick={handleSaveProfile}
                 disabled={isLoading}
                 style={{
-                  marginTop: "0.5rem",
+                  marginTop: "1.5rem",
                   width: "100%",
                   padding: "0.75rem",
                   borderRadius: "0.5rem",
@@ -151,8 +151,8 @@ export default function Settings() {
           </section>
 
           {/* Account Info */}
-          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.5rem" }}>
+          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "6rem 3rem" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "2rem" }}>
               <span style={{ padding: "0.5rem", borderRadius: "0.5rem", background: "rgba(16, 185, 129, 0.1)", color: "#10b981" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
               </span>
@@ -178,8 +178,8 @@ export default function Settings() {
         {/* Right Column */}
         <div style={{ display: "flex", flexDirection: "column", gap: "1.5rem" }}>
           {/* Chat Preferences */}
-          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.5rem" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "1.5rem" }}>
+          <section className="feature-card-modern" style={{ background: "#0a0a0a", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "6rem 3rem", height: "fit-content" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "2rem" }}>
               <span style={{ padding: "0.5rem", borderRadius: "0.5rem", background: "rgba(245, 158, 11, 0.1)", color: "#f59e0b" }}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
               </span>

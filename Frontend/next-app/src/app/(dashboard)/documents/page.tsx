@@ -15,7 +15,7 @@ export default function DocumentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [filter, setFilter] = useState<
-    "all" | "indexed" | "processing" | "error"
+    "all" | "indexed" | "processing" | "error" | "indexed_light"
   >("all");
 
   // Redirect non-admins
@@ -125,19 +125,19 @@ export default function DocumentsPage() {
 
       {/* Stats Bar */}
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", marginBottom: "2rem" }}>
-        <div style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.25rem" }}>
+        <div style={{ background: "rgba(255, 255, 255, 0.06)", border: "1px solid rgba(255, 255, 255, 0.1)", borderRadius: "1rem", padding: "1.25rem" }}>
           <p style={{ color: "#9ca3af", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Total Documents</p>
           <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.length}</p>
         </div>
-        <div style={{ background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
+        <div style={{ background: "rgba(16, 185, 129, 0.2)", border: "1px solid rgba(16, 185, 129, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
           <p style={{ color: "#34d399", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Indexed</p>
           <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.filter((d) => d.status === "indexed").length}</p>
         </div>
-        <div style={{ background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
+        <div style={{ background: "rgba(245, 158, 11, 0.2)", border: "1px solid rgba(245, 158, 11, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
           <p style={{ color: "#fbbf24", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Processing</p>
           <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.filter((d) => d.status === "processing").length}</p>
         </div>
-        <div style={{ background: "rgba(59, 130, 246, 0.1)", border: "1px solid rgba(59, 130, 246, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
+        <div style={{ background: "rgba(59, 130, 246, 0.2)", border: "1px solid rgba(59, 130, 246, 0.2)", borderRadius: "1rem", padding: "1.25rem" }}>
           <p style={{ color: "#60a5fa", fontSize: "0.875rem", marginBottom: "0.5rem" }}>Total Chunks</p>
           <p style={{ color: "white", fontSize: "1.5rem", fontWeight: "600" }}>{documents.reduce((acc, d) => acc + d.chunk_count, 0)}</p>
         </div>
@@ -179,7 +179,7 @@ export default function DocumentsPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem" }}>
           <h3 style={{ fontSize: "1.25rem", fontWeight: "600", color: "white" }}>All Documents</h3>
           <div style={{ display: "flex", gap: "0.5rem", background: "#1f2937", padding: "0.25rem", borderRadius: "0.5rem" }}>
-            {(["all", "indexed", "processing", "error"] as const).map((f) => (
+            {(["all", "indexed", "indexed_light", "processing", "error"] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}

@@ -656,7 +656,7 @@ export default function Chat() {
           </div>
         ) : (
           <>
-            <header>
+            <header style={{ marginBottom: "3rem" }}>
               <h2>Chat with your Knowledge Base</h2>
               <p>
                 Ask questions about your uploaded documents securely and privately.

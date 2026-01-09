@@ -13,24 +13,30 @@ export default function Dashboard() {
   return (
     <main className="main-content">
       <header style={{ marginBottom: "3rem" }}>
-        <h2 style={{ fontSize: "2rem", marginBottom: "0.5rem", background: "linear-gradient(to right, #fff, #9ca3af)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Dashboard</h2>
-        <p style={{ color: "#9ca3af" }}>
-          Welcome back{user?.full_name ? `, ${user.full_name}` : ""}
-        </p>
+        <h2 style={{
+          fontSize: "3.5rem",
+          marginBottom: "0.5rem",
+          background: "linear-gradient(to right, #fff, #9ca3af)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent",
+          fontFamily: "var(--font-space-grotesk), sans-serif"
+        }}>
+          Dashboard
+        </h2>
       </header>
 
       <div
         className="dashboard-grid"
         style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gridTemplateColumns: "repeat(3, 1fr)",
           gap: "1.5rem",
         }}
       >
         <div
           onClick={() => router.push('/chat')}
           className="feature-card-modern"
-          style={{ cursor: "pointer", minHeight: "200px" }}
+          style={{ cursor: "pointer", minHeight: "260px" }}
         >
           <div style={{ marginBottom: "1.5rem", width: "48px", height: "48px", borderRadius: "12px", background: "rgba(59, 130, 246, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#3b82f6" }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -44,7 +50,7 @@ export default function Dashboard() {
         <div
           onClick={() => router.push('/settings')}
           className="feature-card-modern"
-          style={{ cursor: "pointer", minHeight: "200px" }}
+          style={{ cursor: "pointer", minHeight: "260px" }}
         >
           <div style={{ marginBottom: "1.5rem", width: "48px", height: "48px", borderRadius: "12px", background: "rgba(139, 92, 246, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#8b5cf6" }}>
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -62,7 +68,7 @@ export default function Dashboard() {
             <div
               onClick={() => router.push('/analytics')}
               className="feature-card-modern"
-              style={{ cursor: "pointer", minHeight: "200px", borderColor: "rgba(16, 185, 129, 0.2)" }}
+              style={{ cursor: "pointer", minHeight: "260px", borderColor: "rgba(16, 185, 129, 0.2)" }}
             >
               <div style={{ marginBottom: "1.5rem", width: "48px", height: "48px", borderRadius: "12px", background: "rgba(16, 185, 129, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#10b981" }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -78,7 +84,7 @@ export default function Dashboard() {
             <div
               onClick={() => router.push('/admin')}
               className="feature-card-modern"
-              style={{ cursor: "pointer", minHeight: "200px", borderColor: "rgba(245, 158, 11, 0.2)" }}
+              style={{ cursor: "pointer", minHeight: "260px", borderColor: "rgba(245, 158, 11, 0.2)" }}
             >
               <div style={{ marginBottom: "1.5rem", width: "48px", height: "48px", borderRadius: "12px", background: "rgba(245, 158, 11, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#f59e0b" }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -95,7 +101,7 @@ export default function Dashboard() {
             <div
               onClick={() => router.push('/documents')}
               className="feature-card-modern"
-              style={{ cursor: "pointer", minHeight: "200px", borderColor: "rgba(236, 72, 153, 0.2)" }}
+              style={{ cursor: "pointer", minHeight: "260px", borderColor: "rgba(236, 72, 153, 0.2)" }}
             >
               <div style={{ marginBottom: "1.5rem", width: "48px", height: "48px", borderRadius: "12px", background: "rgba(236, 72, 153, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#ec4899" }}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -108,6 +114,24 @@ export default function Dashboard() {
               </div>
               <h3>Documents</h3>
               <p>Upload new files, manage existing documents, and check indexing status.</p>
+            </div>
+
+            <div
+              onClick={() => router.push('/admin/graph')}
+              className="feature-card-modern"
+              style={{ cursor: "pointer", minHeight: "260px", borderColor: "rgba(6, 182, 212, 0.2)" }}
+            >
+              <div style={{ marginBottom: "1.5rem", width: "48px", height: "48px", borderRadius: "12px", background: "rgba(6, 182, 212, 0.2)", display: "flex", alignItems: "center", justifyContent: "center", color: "#06b6d4" }}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="18" cy="5" r="3"></circle>
+                  <circle cx="6" cy="12" r="3"></circle>
+                  <circle cx="18" cy="19" r="3"></circle>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+              </div>
+              <h3>Knowledge Graph</h3>
+              <p>Visualize relationships between your documents and explore the semantic network.</p>
             </div>
           </>
         )}
