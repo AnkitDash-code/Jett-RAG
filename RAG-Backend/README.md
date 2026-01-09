@@ -13,9 +13,65 @@ This unified FastAPI backend implements a complete RAG (Retrieval-Augmented Gene
 - 🧠 **Supermemory** system (episodic + semantic memory)
 - 🔍 Hybrid search (FAISS vector + BM25 keyword)
 - 🎯 Self-reflection with auto-retry
-- 🔄 Background job queue (Python-only, no Redis/Celery)
+- 🔄 Background job queue (Python-only, no Redis/Cellar)
 - 🛡️ Production-ready (circuit breakers, audit logs, health checks)
 - 💬 Real-time streaming (SSE + WebSocket)
+- ⚡ **Offline-ready** - Auto-caches models on first run
+
+---
+
+## 🚀 Quick Start (Automatic Offline Setup)
+
+### **Windows - One-Click Start**
+
+```bash
+# Double-click to start (first run downloads models automatically)
+start.bat
+```
+
+### **Manual Start (First Time)**
+
+```bash
+cd RAG-Backend
+myenv\Scripts\activate
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
+```
+
+**First run will automatically:**
+
+- ✅ Download embedding models (~80 MB)
+- ✅ Download reranker model (~80 MB)
+- ✅ Download spaCy NER model (~15 MB)
+- ✅ Cache everything for offline use
+- ✅ Subsequent runs start instantly
+
+See [OFFLINE_SETUP.md](OFFLINE_SETUP.md) for complete offline configuration guide.
+
+---
+
+## 📦 What Gets Cached?
+
+| Model                  | Size    | Purpose               | Status       |
+| ---------------------- | ------- | --------------------- | ------------ |
+| all-MiniLM-L6-v2       | ~80 MB  | Document embeddings   | Auto-cached  |
+| ms-marco-MiniLM-L-6-v2 | ~80 MB  | Result reranking      | Auto-cached  |
+| en_core_web_sm         | ~15 MB  | Entity extraction     | Auto-cached  |
+| mistral-7b-instruct    | ~4.4 GB | LLM generation        | Manual setup |
+| Tesseract OCR          | ~50 MB  | Image text extraction | Optional     |
+
+**Total:** ~4.6 GB for complete offline operation
+
+---
+
+## 🧪 Test Offline Readiness
+
+```bash
+# Check if all models cached and services running
+test.bat
+
+# Or manually:
+python test_offline.py
+```
 
 ---
 
@@ -810,7 +866,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES=60
 
 ---
 
-## ��� Integration with Frontend
+## ��� Integration with Frontend
 
 The frontend (Next.js) should:
 
@@ -835,13 +891,13 @@ const response = await fetch("http://localhost:8081/v1/chat", {
 
 ---
 
-## ��� License
+## ��� License
 
 MIT License - See LICENSE file for details.
 
 ---
 
-## ��� Contributing
+## ��� Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -854,6 +910,7 @@ MIT License - See LICENSE file for details.
 Built with ❤️ for the Aerothon Hackathon
 
 **Tech Stack Summary:**
+
 - 40+ services
 - 14 database models
 - 60+ API endpoints

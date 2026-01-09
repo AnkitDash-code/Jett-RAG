@@ -28,6 +28,7 @@ python-docx>=1.1.0
 sentence-transformers>=2.2.0
 torch>=2.1.0
 numpy>=1.24.0
+# spacy>=3.7.0  # OPTIONAL - Not compatible with Python 3.14+, entity extraction uses LLM instead
 
 # Vector Database (FAISS - works natively on Windows, no Docker needed)
 faiss-cpu>=1.7.0
@@ -66,6 +67,10 @@ pytest-cov>=4.1.0
 # opentelemetry-sdk>=1.21.0
 # opentelemetry-instrumentation-fastapi>=0.42b0
 # opentelemetry-exporter-otlp>=1.21.0
+
+# OCR Dependencies (Optional)
+pytesseract>=0.3.10
+Pillow>=10.0.0
 
 # Optional: EasyOCR (GPU-accelerated OCR using existing PyTorch)
 # easyocr>=1.7.0

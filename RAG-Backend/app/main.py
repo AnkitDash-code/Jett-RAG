@@ -31,6 +31,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     
+    # FIRST RUN: Cache all models for offline operation
+    from app.utils.model_cache import ensure_models_cached
+    ensure_models_cached()
+    
     # Initialize database
     await init_db()
     logger.info("Database initialized")
