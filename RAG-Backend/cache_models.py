@@ -27,10 +27,10 @@ def main():
     # Force re-cache if script is run directly
     results = manager.cache_all_models(force=True)
     
-    # Check if all critical models succeeded
+    # Check if all critical models succeeded (spaCy is optional)
     all_critical_ok = True
     for name, (success, _) in results.items():
-        if name != "Tesseract OCR" and name != "status" and not success:
+        if name not in ["spaCy Model", "status"] and not success:
             all_critical_ok = False
             break
     

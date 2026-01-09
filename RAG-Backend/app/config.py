@@ -57,8 +57,12 @@ class Settings(BaseSettings):
     
     # Vector Database (FAISS - current implementation)
     # Phase 2: Weaviate with Docker for production hybrid search
-    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"
-    EMBEDDING_DIMENSION: int = 384
+    EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"  # Fallback sentence-transformers model
+    EMBEDDING_DIMENSION: int = 1024  # Qwen3-Embedding-0.6B dimension
+    
+    # KoboldCpp Local Models (GGUF)
+    USE_KOBOLD_EMBEDDING: bool = True  # Use koboldcpp for embeddings
+    EMBEDDING_KOBOLD_URL: str = "http://localhost:5001"  # Qwen3-Embedding server
     
     # GraphRAG Settings (rustworkx + SQLite)
     ENABLE_GRAPH_RAG: bool = True  # Enable knowledge graph extraction

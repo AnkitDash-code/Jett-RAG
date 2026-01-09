@@ -2,8 +2,18 @@
 RAG Backend - Main FastAPI Application
 Unified API server for auth, documents, retrieval, chat, and monitoring.
 """
+import os
+
+# Force HuggingFace offline mode BEFORE importing any transformers/sentence-transformers
+# This prevents network requests when models are already cached
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_DATASETS_OFFLINE", "1")
+
 import logging
 from contextlib import asynccontextmanager
+import subprocess
+import sys
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +23,7 @@ from app.config import settings
 from app.database import init_db, async_session_maker
 from app.api.v1 import api_router
 from app.middleware.logging import RequestLoggingMiddleware
-from app.middleware.error_handler import global_exception_handler
+from app.middleware.error_handler import global_exception_handler, AppException
 from app.middleware.rate_limit import setup_rate_limiting
 
 # Configure logging
@@ -22,6 +32,30 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Start KoboldCpp embedding server at startup (if not already running)
+try:
+    embedding_launcher = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'init_embedding.py'))
+    if os.path.exists(embedding_launcher):
+        logger.info(f"Starting KoboldCpp embedding server...")
+        # Run synchronously to ensure server is ready before app starts
+        result = subprocess.run(
+            [sys.executable, embedding_launcher],
+            cwd=os.path.dirname(embedding_launcher),
+            capture_output=True,
+            text=True,
+            timeout=60  # Wait up to 60 seconds for server to start
+        )
+        if result.returncode == 0:
+            logger.info("KoboldCpp embedding server started successfully")
+        else:
+            logger.warning(f"Embedding server startup issue: {result.stderr}")
+    else:
+        logger.warning(f"init_embedding.py not found at {embedding_launcher}")
+except subprocess.TimeoutExpired:
+    logger.warning("Embedding server startup timed out, continuing anyway...")
+except Exception as e:
+    logger.warning(f"Failed to launch embedding server: {e}")
 
 
 @asynccontextmanager
@@ -134,7 +168,8 @@ def create_application() -> FastAPI:
     # Custom middleware
     app.add_middleware(RequestLoggingMiddleware)
     
-    # Global exception handler
+    # Global exception handler - register AppException first for proper handling
+    app.add_exception_handler(AppException, global_exception_handler)
     app.add_exception_handler(Exception, global_exception_handler)
     
     # Setup rate limiting

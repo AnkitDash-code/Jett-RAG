@@ -23,7 +23,7 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 from app.config import settings
-from app.services.ocr_service import OCRService
+from app.services.vision_llm_client import get_vision_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +42,9 @@ class DoclingParser:
     """
     
     def __init__(self):
-        self.enabled = getattr(settings, 'ENABLE_DOCLING_PARSER', False)
-        self.timeout = getattr(settings, 'DOCLING_TIMEOUT_SECONDS', 120)
-        self.vlm_enabled = getattr(settings, 'ENABLE_REMOTE_VLM', False)
-        self._docling_available = None
-        self._granite_client = None
-        self._ocr_service = OCRService()
+        self.enabled = True
+        self.timeout = 120
+        self._vision_client = None
     
     def _check_docling(self) -> bool:
         """Check if Docling is installed and available."""
@@ -76,123 +73,56 @@ class DoclingParser:
                 self._granite_client = None
         return self._granite_client
     
+    def _get_vision_client(self):
+        """Get Vision LLM client (lazy loading)."""
+        if self._vision_client is None:
+            try:
+                self._vision_client = get_vision_llm_client()
+                logger.info("Vision LLM client initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Vision LLM client: {e}")
+                self._vision_client = None
+        return self._vision_client
+    
+    def _needs_vision_fallback(self, extracted_text: str, page_count: int) -> bool:
+        """Check if document needs Vision LLM fallback (insufficient text)."""
+        if not extracted_text:
+            return True
+        
+        text_per_page = len(extracted_text) / max(page_count, 1)
+        return text_per_page < self._min_text_threshold
+    
     def is_available(self) -> bool:
-        """Check if Docling parsing is enabled and available."""
-        return self.enabled and (self._check_docling() or self.vlm_enabled)
+        """Always available (Vision LLM only)."""
+        return self.enabled
     
     async def parse(self, file_path: str) -> Dict[str, Any]:
         """
-        Parse document using Granite VLM or Docling.
-        
-        Pipeline:
-        1. Try Granite VLM (remote) for PDFs
-        2. Fallback to local Docling
-        3. Fallback raises error
-        
+        Parse document using Vision LLM only.
         Returns:
             Dict with keys:
             - text: Full extracted text
-            - sections: List of sections with text, title, hierarchy
-            - tables: List of extracted tables
-            - images: List of image metadata (with VLM descriptions if available)
+            - sections: List of sections (if available)
+            - images: List of image metadata (if available)
             - page_count: Number of pages
             - metadata: Document metadata
-            - doctags: DocTags format (if from VLM)
         """
         ext = os.path.splitext(file_path)[1].lower()
-        
-        # Try Granite VLM first for PDFs if enabled
-        if ext == ".pdf" and self.vlm_enabled:
-            try:
-                result = await self._parse_with_granite_vlm(file_path)
-                logger.info(f"Parsed with Granite VLM: {os.path.basename(file_path)}")
-                return result
-            except Exception as e:
-                logger.warning(
-                    f"Granite VLM parsing failed, falling back to local Docling: {e}"
-                )
-        
-        # Fallback to local Docling
-        if self._check_docling():
-            try:
-                loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    self._parse_sync,
-                    file_path,
-                )
-                logger.info(f"Parsed with local Docling: {os.path.basename(file_path)}")
-                
-                # Check if we need OCR fallback
-                extracted_text = result.get("text", "").strip()
-                page_count = result.get("page_count", 1)
-                
-                if self._ocr_service.is_available():
-                    needs_ocr = self._ocr_service.needs_ocr(
-                        file_path, extracted_text, page_count
-                    )
-                    
-                    if needs_ocr:
-                        logger.info(
-                            f"Docling returned insufficient text ({len(extracted_text)} chars), "
-                            f"triggering EasyOCR fallback"
-                        )
-                        try:
-                            ocr_result = await self._ocr_service.process_with_ocr(file_path)
-                            ocr_text = ocr_result.get("text", "").strip()
-                            
-                            if ocr_text and len(ocr_text) > len(extracted_text):
-                                logger.info(
-                                    f"EasyOCR extracted {len(ocr_text)} chars vs "
-                                    f"Docling {len(extracted_text)} chars, using OCR text"
-                                )
-                                result["text"] = ocr_text
-                                result["sections"] = ocr_result.get("sections", result.get("sections", []))
-                                result["metadata"]["ocr_fallback"] = True
-                                result["metadata"]["ocr_confidence"] = ocr_result.get("metadata", {}).get("confidence", 0.0)
-                        except Exception as ocr_error:
-                            logger.warning(f"EasyOCR fallback failed: {ocr_error}")
-                
-                return result
-            except Exception as e:
-                logger.error(f"Local Docling parsing failed: {e}")
-                raise
-        
-        # No Docling available, try basic parser with OCR fallback
-        logger.warning("Docling not available, using basic parser with OCR fallback")
-        result = await self._parse_basic(file_path)
-        
-        # Check if we need OCR fallback for scanned documents
-        extracted_text = result.get("text", "").strip()
-        page_count = result.get("page_count", 1)
-        
-        if self._ocr_service.is_available() and ext == ".pdf":
-            needs_ocr = self._ocr_service.needs_ocr(
-                file_path, extracted_text, page_count
-            )
-            
-            if needs_ocr:
-                logger.info(
-                    f"Basic parser returned insufficient text ({len(extracted_text)} chars), "
-                    f"triggering EasyOCR fallback"
-                )
-                try:
-                    ocr_result = await self._ocr_service.process_with_ocr(file_path)
-                    ocr_text = ocr_result.get("text", "").strip()
-                    
-                    if ocr_text and len(ocr_text) > len(extracted_text):
-                        logger.info(
-                            f"EasyOCR extracted {len(ocr_text)} chars vs "
-                            f"basic parser {len(extracted_text)} chars, using OCR text"
-                        )
-                        result["text"] = ocr_text
-                        result["sections"] = ocr_result.get("sections", result.get("sections", []))
-                        result["metadata"]["ocr_fallback"] = True
-                        result["metadata"]["ocr_confidence"] = ocr_result.get("metadata", {}).get("confidence", 0.0)
-                except Exception as ocr_error:
-                    logger.warning(f"EasyOCR fallback failed: {ocr_error}")
-        
-        return result
+        vision_client = self._get_vision_client()
+        if not vision_client or not vision_client.is_available():
+            raise RuntimeError("Vision LLM client not available")
+        if ext == ".pdf":
+            result = await vision_client.extract_from_pdf_pages(file_path)
+        else:
+            result = await vision_client.extract_from_file(file_path)
+        # Ensure standard keys
+        return {
+            "text": result.get("text", ""),
+            "sections": result.get("sections", []),
+            "images": result.get("images", []),
+            "page_count": result.get("page_count", 1),
+            "metadata": result.get("metadata", {}),
+        }
     
     async def _parse_with_granite_vlm(self, file_path: str) -> Dict[str, Any]:
         """Parse document using remote Granite VLM via /v1/convert."""
@@ -243,35 +173,32 @@ class DoclingParser:
                 "markdown": vlm_result.get("markdown", ""),
             }
             
-            # Check if we need OCR fallback (empty or insufficient text)
+            # Check if we need Vision LLM fallback (empty or insufficient text)
             extracted_text = result["text"].strip()
             page_count = result["page_count"]
             
-            if self._ocr_service.is_available():
-                needs_ocr = self._ocr_service.needs_ocr(
-                    file_path, extracted_text, page_count
-                )
-                
-                if needs_ocr:
+            vision_client = self._get_vision_client()
+            if vision_client and vision_client.is_available():
+                if self._needs_vision_fallback(extracted_text, page_count):
                     logger.info(
                         f"Granite VLM returned insufficient text ({len(extracted_text)} chars), "
-                        f"triggering EasyOCR fallback"
+                        f"triggering Vision LLM fallback"
                     )
                     try:
-                        ocr_result = await self._ocr_service.process_with_ocr(file_path)
-                        ocr_text = ocr_result.get("text", "").strip()
+                        vision_result = await vision_client.extract_from_pdf_pages(file_path)
+                        vision_text = vision_result.get("text", "").strip()
                         
-                        if ocr_text and len(ocr_text) > len(extracted_text):
+                        if vision_text and len(vision_text) > len(extracted_text):
                             logger.info(
-                                f"EasyOCR extracted {len(ocr_text)} chars vs "
-                                f"Granite {len(extracted_text)} chars, using OCR text"
+                                f"Vision LLM extracted {len(vision_text)} chars vs "
+                                f"Granite {len(extracted_text)} chars, using Vision LLM text"
                             )
-                            result["text"] = ocr_text
-                            result["sections"] = ocr_result.get("sections", sections)
-                            result["metadata"]["ocr_fallback"] = True
-                            result["metadata"]["ocr_confidence"] = ocr_result.get("metadata", {}).get("confidence", 0.0)
-                    except Exception as ocr_error:
-                        logger.warning(f"EasyOCR fallback failed: {ocr_error}")
+                            result["text"] = vision_text
+                            result["sections"] = vision_result.get("sections", sections)
+                            result["metadata"]["vision_fallback"] = True
+                            result["metadata"]["vision_confidence"] = vision_result.get("metadata", {}).get("confidence", 0.0)
+                    except Exception as vision_error:
+                        logger.warning(f"Vision LLM fallback failed: {vision_error}")
             
             return result
             

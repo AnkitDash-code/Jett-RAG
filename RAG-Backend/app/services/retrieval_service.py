@@ -171,9 +171,15 @@ class EmbeddingService:
     _cached_model = None
     _cached_model_name = None
     _initialized = False
+    _use_kobold = None
+    _kobold_service = None
     
     def __init__(self, model_name: str = settings.EMBEDDING_MODEL):
         self.model_name = model_name
+        # Check if we should use KoboldCpp
+        if EmbeddingService._use_kobold is None:
+            EmbeddingService._use_kobold = getattr(settings, 'USE_KOBOLD_EMBEDDING', False)
+        
         # Use cached model if available
         if EmbeddingService._cached_model is not None and EmbeddingService._cached_model_name == self.model_name:
             self._model = EmbeddingService._cached_model
@@ -181,8 +187,29 @@ class EmbeddingService:
             self._model = None
     
     @classmethod
+    def _get_kobold_service(cls):
+        """Get KoboldCpp embedding service."""
+        if cls._kobold_service is None:
+            from app.services.kobold_embedding_service import get_kobold_embedding_service
+            cls._kobold_service = get_kobold_embedding_service()
+        return cls._kobold_service
+    
+    @classmethod
     def preload_model(cls, model_name: str = settings.EMBEDDING_MODEL):
         """Preload the embedding model at startup. Call this once during app initialization."""
+        # Check if using KoboldCpp
+        cls._use_kobold = getattr(settings, 'USE_KOBOLD_EMBEDDING', False)
+        
+        if cls._use_kobold:
+            kobold = cls._get_kobold_service()
+            if kobold.is_available():
+                logger.info("✅ Using KoboldCpp for embeddings (Qwen3-Embedding)")
+                cls._initialized = True
+                return kobold
+            else:
+                logger.warning("KoboldCpp embedding server not available, falling back to sentence-transformers")
+                cls._use_kobold = False
+        
         if cls._initialized and cls._cached_model_name == model_name:
             logger.info(f"Embedding model already loaded: {model_name}")
             return cls._cached_model
@@ -237,6 +264,15 @@ class EmbeddingService:
     
     def embed(self, texts: List[str]) -> List[List[float]]:
         """Generate embeddings for a list of texts."""
+        # Use KoboldCpp if enabled
+        if EmbeddingService._use_kobold:
+            kobold = self._get_kobold_service()
+            if kobold.is_available():
+                embeddings = kobold.embed(texts)
+                return embeddings.tolist()
+            else:
+                logger.warning("KoboldCpp not available, falling back to sentence-transformers")
+        
         model = self._load_model()
         
         if model is None:

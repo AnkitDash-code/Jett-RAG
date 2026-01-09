@@ -1,6 +1,6 @@
 @echo off
 REM Quick start script for RAG Backend
-REM Automatically caches models on first run
+REM Runs in OFFLINE MODE using cached models
 
 echo ================================
 echo  RAG Backend - Quick Start
@@ -19,9 +19,17 @@ if not exist "myenv\Scripts\activate.bat" (
 echo Activating virtual environment...
 call myenv\Scripts\activate.bat
 
+REM ========================================
+REM OFFLINE MODE - Use cached models only
+REM ========================================
+echo Setting OFFLINE MODE environment variables...
+set HF_HUB_OFFLINE=1
+set TRANSFORMERS_OFFLINE=1
+set HF_DATASETS_OFFLINE=1
+
 echo.
-echo Starting RAG Backend on port 8001...
-echo First run will download models (~175 MB, one-time only)
+echo Starting RAG Backend on port 8081 (OFFLINE MODE)...
+echo Using locally cached models only.
 echo.
 
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8081

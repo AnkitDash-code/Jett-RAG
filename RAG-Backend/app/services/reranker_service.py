@@ -28,7 +28,7 @@ class RerankerService:
         return cls._instance
     
     def __init__(self, model_name: str = None):
-        self.model_name = model_name or settings.CROSS_ENCODER_MODEL
+        self.model_name = model_name or getattr(settings, 'CROSS_ENCODER_MODEL', 'cross-encoder/ms-marco-MiniLM-L-6-v2')
     
     def _load_model(self):
         """Lazy load the cross-encoder model."""
@@ -84,7 +84,7 @@ class RerankerService:
         if not chunks:
             return chunks, 0
         
-        top_k = top_k or settings.RERANK_TOP_K
+        top_k = top_k or getattr(settings, 'RERANK_TOP_K', 10)
         start_time = time.perf_counter()
         
         model = self._load_model()
