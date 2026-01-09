@@ -3,6 +3,7 @@
 import Sidebar from "@/components/Sidebar";
 import { SearchBar } from "@/components/SearchBar";
 import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 
 export default function DashboardLayout({
   children,
@@ -10,6 +11,12 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const [isReady, setIsReady] = useState(false);
+
+  // Add is-ready class after mount to trigger fade-in animation
+  useEffect(() => {
+    setIsReady(true);
+  }, []);
 
   const handleSearch = (query: string) => {
     // Navigate to chat with the search query
@@ -18,11 +25,11 @@ export default function DashboardLayout({
 
   const handleSelectDocument = (docId: string) => {
     // Navigate to document admin page
-    router.push(`/admin?doc=${docId}`);
+    router.push(`/admin? doc=${docId}`);
   };
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${isReady ? "is-ready" : ""}`}>
       <Sidebar />
       <div
         className="dashboard-content"
@@ -34,8 +41,8 @@ export default function DashboardLayout({
           style={{
             display: "flex",
             justifyContent: "flex-end",
-            alignItems: "center",
-            padding: "0.75rem 1.5rem",
+            alignItems:  "center",
+            padding: "0. 75rem 1.5rem",
             borderBottom: "1px solid #374151",
             backgroundColor: "#111827",
           }}
