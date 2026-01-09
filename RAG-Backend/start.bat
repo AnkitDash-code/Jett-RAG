@@ -24,6 +24,6 @@ echo Starting RAG Backend on port 8001...
 echo First run will download models (~175 MB, one-time only)
 echo.
 
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8081
 
 pause

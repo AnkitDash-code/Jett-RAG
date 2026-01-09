@@ -170,10 +170,39 @@ class EmbeddingService:
     # Class-level model cache for reuse across instances
     _cached_model = None
     _cached_model_name = None
+    _initialized = False
     
     def __init__(self, model_name: str = settings.EMBEDDING_MODEL):
         self.model_name = model_name
-        self._model = None
+        # Use cached model if available
+        if EmbeddingService._cached_model is not None and EmbeddingService._cached_model_name == self.model_name:
+            self._model = EmbeddingService._cached_model
+        else:
+            self._model = None
+    
+    @classmethod
+    def preload_model(cls, model_name: str = settings.EMBEDDING_MODEL):
+        """Preload the embedding model at startup. Call this once during app initialization."""
+        if cls._initialized and cls._cached_model_name == model_name:
+            logger.info(f"Embedding model already loaded: {model_name}")
+            return cls._cached_model
+        
+        try:
+            import torch
+            from sentence_transformers import SentenceTransformer
+            
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Preloading embedding model on device: {device}")
+            
+            cls._cached_model = SentenceTransformer(model_name, device=device)
+            cls._cached_model_name = model_name
+            cls._initialized = True
+            
+            logger.info(f"✅ Embedding model preloaded: {model_name} on {device}")
+            return cls._cached_model
+        except Exception as e:
+            logger.error(f"Failed to preload embedding model: {e}", exc_info=True)
+            return None
     
     def _load_model(self):
         """Lazy load the embedding model with GPU support."""

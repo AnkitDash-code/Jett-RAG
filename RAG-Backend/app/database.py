@@ -4,15 +4,30 @@ Uses SQLAlchemy async with SQLModel for ORM.
 """
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
 from app.config import settings
+
+# SQLite-specific connection args for async/concurrent access
+connect_args = {}
+poolclass = None
+
+if settings.DATABASE_URL.startswith("sqlite"):
+    connect_args = {
+        "check_same_thread": False,
+        "timeout": 30,  # Wait up to 30 seconds for locks
+    }
+    # Use StaticPool for SQLite to avoid connection issues
+    poolclass = StaticPool
 
 # Create async engine
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DATABASE_ECHO,
     future=True,
+    connect_args=connect_args,
+    poolclass=poolclass,
 )
 
 # Session factory

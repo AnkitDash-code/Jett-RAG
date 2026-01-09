@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
     from app.utils.model_cache import ensure_models_cached
     ensure_models_cached()
     
+    # Preload embedding model on GPU for fast inference
+    from app.services.retrieval_service import EmbeddingService
+    EmbeddingService.preload_model()
+    
     # Initialize database
     await init_db()
     logger.info("Database initialized")

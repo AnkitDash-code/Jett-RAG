@@ -6,9 +6,6 @@ import { toast } from "sonner";
 import { Message, Document } from "@/types";
 import { api } from "@/lib/api";
 import { useChatStream } from "@/hooks/useChatStream";
-import CitationCard from "@/components/CitationCard";
-import ChunkPreviewModal from "@/components/ChunkPreviewModal";
-import ConversationExporter from "@/components/ConversationExporter";
 import type {
   SourceCitation,
   DocumentResponse,
@@ -84,8 +81,8 @@ function SourceModal({
                     source.relevance === "High"
                       ? "#065f46"
                       : source.relevance === "Medium"
-                      ? "#92400e"
-                      : "#374151",
+                        ? "#92400e"
+                        : "#374151",
                   color: "#fff",
                   padding: "0.125rem 0.5rem",
                   borderRadius: "9999px",
@@ -147,7 +144,6 @@ export default function Chat() {
   const [selectedSource, setSelectedSource] = useState<SourceCitation | null>(
     null
   );
-  const [previewChunkId, setPreviewChunkId] = useState<string | null>(null);
   const { streamChat, stopStream, isStreaming } = useChatStream();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -175,16 +171,15 @@ export default function Chat() {
     fetchConversations();
   }, []);
 
-  // Track if we're currently polling (use ref to avoid re-render loops)
+  // Track if we're currently polling
   const isPollingRef = useRef(false);
 
-  // Auto-poll for document status updates when there are processing documents
+  // Auto-poll for document status updates
   useEffect(() => {
     const hasProcessingDocs = documents.some(
       (doc) => !doc.status?.includes("indexed") && doc.status !== "error"
     );
 
-    // Only start polling if not already polling and there are processing docs
     if (!hasProcessingDocs || isPollingRef.current) return;
 
     isPollingRef.current = true;
@@ -192,12 +187,9 @@ export default function Chat() {
     const pollInterval = setInterval(async () => {
       try {
         const response = await api.listDocuments();
-
-        // Check if any document is still processing
         const stillProcessing = response.documents.some(
           (doc) => !doc.status?.includes("indexed") && doc.status !== "error"
         );
-
         setDocuments(response.documents);
 
         if (!stillProcessing) {
@@ -208,13 +200,13 @@ export default function Chat() {
       } catch {
         // Silently fail
       }
-    }, 3000); // Poll every 3 seconds
+    }, 3000);
 
     return () => {
       clearInterval(pollInterval);
       isPollingRef.current = false;
     };
-  }, [documents]); // Re-run when documents change
+  }, [documents]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -224,7 +216,6 @@ export default function Chat() {
     scrollToBottom();
   }, [messages]);
 
-  // Refresh document list
   const refreshDocuments = async () => {
     try {
       const response = await api.listDocuments();
@@ -234,7 +225,6 @@ export default function Chat() {
     }
   };
 
-  // Delete document handler
   const handleDeleteDocument = async (docId: string, docName: string) => {
     if (
       !confirm(
@@ -249,14 +239,12 @@ export default function Chat() {
       toast.success(`"${docName}" deleted successfully`);
     } catch (error) {
       toast.error(
-        `Failed to delete document: ${
-          error instanceof Error ? error.message : "Unknown error"
+        `Failed to delete document: ${error instanceof Error ? error.message : "Unknown error"
         }`
       );
     }
   };
 
-  // Document upload handler
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
@@ -266,7 +254,6 @@ export default function Chat() {
     try {
       const result = await api.uploadDocument(file);
       toast.success(`Uploaded ${result.filename}`);
-      // Refresh the document list to get the full document info
       await refreshDocuments();
     } catch (error) {
       toast.error((error as Error).message || "Upload failed");
@@ -275,11 +262,13 @@ export default function Chat() {
     }
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open } = useDropzone({
     onDrop,
     accept: { "application/pdf": [".pdf"] },
-    maxSize: 10 * 1024 * 1024, // 10MB
+    maxSize: 10 * 1024 * 1024,
     multiple: false,
+    noClick: true,
+    noKeyboard: true
   });
 
   const handleSend = async () => {
@@ -296,7 +285,6 @@ export default function Chat() {
     const query = input;
     setInput("");
 
-    // Create placeholder for streaming response
     const assistantMessageId = (Date.now() + 1).toString();
     streamingMessageRef.current = "";
 
@@ -330,11 +318,10 @@ export default function Chat() {
       },
       onDone: ({ conversation_id }) => {
         setConversationId(conversation_id);
-        // Refresh conversations list
         api
           .getChatHistory()
           .then((res) => setConversations(res.conversations))
-          .catch(() => {});
+          .catch(() => { });
       },
       onError: (error) => {
         setMessages((prev) =>
@@ -349,7 +336,6 @@ export default function Chat() {
     });
   };
 
-  // Load a conversation from history
   const loadConversation = async (convId: string) => {
     try {
       const conversation = await api.getConversation(convId);
@@ -369,7 +355,6 @@ export default function Chat() {
     }
   };
 
-  // Start a new conversation
   const startNewConversation = () => {
     setConversationId(null);
     setMessages([
@@ -390,388 +375,403 @@ export default function Chat() {
     }
   };
 
+  const showEmptyState = documents.length === 0 && messages.length <= 1;
+
   return (
     <main className="main-content chat-page">
-      <header>
-        <h2>Chat with your Knowledge Base</h2>
-        <p>
-          Ask questions about your uploaded documents securely and privately.
-        </p>
-      </header>
-
-      <section className="chat-grid">
-        {/* Left Panel: Upload & Sources */}
-        <div className="panel upload-panel">
-          <h3>Upload Documents</h3>
-          <p
-            style={{
-              fontSize: "0.875rem",
-              color: "#6b7280",
-              marginBottom: "1rem",
-            }}
-          >
-            Add PDFs to your knowledge graph.
-          </p>
-
-          <div
-            {...getRootProps()}
-            className={`drag-drop ${isDragActive ? "drag-active" : ""}`}
-            style={{
-              cursor: isUploading ? "wait" : "pointer",
-              opacity: isUploading ? 0.6 : 1,
-            }}
-          >
+      <div className="page-fade">
+        {showEmptyState ? (
+          <div className="empty-state-mid">
+            {/* Hidden input for dropzone functionality */}
             <input {...getInputProps()} />
-            <i className="icon-lg">📄</i>
-            <p style={{ fontWeight: 500 }}>
-              {isUploading
-                ? "Uploading..."
-                : isDragActive
-                ? "Drop the file here..."
-                : "Drag & drop or click to upload"}
-            </p>
-            <small style={{ color: "#9ca3af" }}>PDF files up to 10MB</small>
-          </div>
 
-          <div style={{ marginTop: "auto" }}>
-            <h3>Active Documents ({documents.length})</h3>
-            <ul className="sources-list">
-              {documents.length === 0 ? (
-                <li style={{ color: "#9ca3af", fontStyle: "italic" }}>
-                  No documents uploaded yet
-                </li>
-              ) : (
-                documents.map((doc) => (
-                  <li
-                    key={doc.id}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontSize: "0.875rem",
-                        flex: 1,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {doc.filename}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: "0.75rem",
-                        backgroundColor: doc.status?.includes("indexed")
-                          ? "#d1fae5"
-                          : doc.status === "error"
-                          ? "#fee2e2"
-                          : "#fef3c7",
-                        color: doc.status?.includes("indexed")
-                          ? "#065f46"
-                          : doc.status === "error"
-                          ? "#dc2626"
-                          : "#92400e",
-                        padding: "0.125rem 0.5rem",
-                        borderRadius: "9999px",
-                        flexShrink: 0,
-                      }}
-                    >
-                      {doc.status?.includes("indexed")
-                        ? "Indexed"
-                        : doc.status === "error"
-                        ? "Error"
-                        : "Processing"}
-                    </span>
-                    <button
-                      onClick={() => handleDeleteDocument(doc.id, doc.filename)}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        padding: "0.25rem",
-                        fontSize: "1rem",
-                        color: "#9ca3af",
-                        flexShrink: 0,
-                      }}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.color = "#ef4444")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.color = "#9ca3af")
-                      }
-                      title="Delete document"
-                    >
-                      🗑️
-                    </button>
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
+            <h1 className="empty-title">
+              How can I help you today?
+            </h1>
 
-          {/* Chat History */}
-          <div style={{ marginTop: "1.5rem" }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "0.5rem",
-              }}
-            >
-              <h3 style={{ margin: 0 }}>Chat History</h3>
-              <button
-                onClick={startNewConversation}
-                style={{
-                  background: "none",
-                  border: "1px solid #374151",
-                  borderRadius: "0.25rem",
-                  padding: "0.25rem 0.5rem",
-                  fontSize: "0.75rem",
-                  cursor: "pointer",
-                  color: "#9ca3af",
-                }}
-                title="Start new chat"
-              >
-                + New
-              </button>
-            </div>
-            <ul
-              className="sources-list"
-              style={{ maxHeight: "200px", overflowY: "auto" }}
-            >
-              {conversations.length === 0 ? (
-                <li style={{ color: "#9ca3af", fontStyle: "italic" }}>
-                  No past conversations
-                </li>
-              ) : (
-                conversations.map((conv) => (
-                  <li
-                    key={conv.id}
-                    onClick={() => loadConversation(conv.id)}
-                    style={{
-                      cursor: "pointer",
-                      padding: "0.5rem",
-                      borderRadius: "0.25rem",
-                      backgroundColor:
-                        conversationId === conv.id
-                          ? "rgba(59, 130, 246, 0.2)"
-                          : "transparent",
-                      borderLeft:
-                        conversationId === conv.id
-                          ? "3px solid #3b82f6"
-                          : "3px solid transparent",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (conversationId !== conv.id) {
-                        e.currentTarget.style.backgroundColor =
-                          "rgba(255,255,255,0.05)";
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (conversationId !== conv.id) {
-                        e.currentTarget.style.backgroundColor = "transparent";
-                      }
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: "0.875rem",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      💬 {conv.title || `Chat ${conv.id.slice(0, 8)}...`}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.7rem",
-                        color: "#6b7280",
-                        marginTop: "0.125rem",
-                      }}
-                    >
-                      {conv.message_count} messages •{" "}
-                      {new Date(conv.created_at).toLocaleDateString()}
-                    </div>
-                  </li>
-                ))
-              )}
-            </ul>
-          </div>
-        </div>
-
-        {/* Right Panel: Chat Interface */}
-        <div
-          className="panel question-panel"
-          style={{
-            position: "relative",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          {/* Chat Header with Export */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              padding: "0.75rem 1rem",
-              borderBottom: "1px solid #374151",
-              backgroundColor: "#111827",
-            }}
-          >
-            <h3 style={{ margin: 0, fontSize: "1rem", color: "#f9fafb" }}>
-              💬 {conversationId ? `Conversation` : "New Chat"}
-            </h3>
-            <ConversationExporter
-              conversationId={conversationId || undefined}
-              messages={messages.filter((msg) => msg.content.length > 0)}
-              onImport={(importedMessages) => {
-                setMessages(importedMessages);
-                setConversationId(null);
-                toast.success("Conversation imported successfully");
-              }}
-            />
-          </div>
-
-          {/* Messages Area */}
-          <div
-            className="answer-box"
-            style={{ marginBottom: "1rem", paddingRight: "0.5rem" }}
-          >
-            {messages.map((msg) => (
-              <div key={msg.id} className={`message-container ${msg.role}`}>
-                <div className="message-bubble">
-                  <div className="message-header">
-                    <i className="icon">{msg.role === "user" ? "👤" : "🤖"}</i>
-                    <span>{msg.role === "user" ? "You" : "Assistant"}</span>
-                  </div>
-                  <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>
-
-                  {/* Sources for Assistant Messages */}
-                  {msg.sources && msg.sources.length > 0 && (
-                    <div
-                      className="message-sources"
-                      style={{ marginTop: "0.75rem" }}
-                    >
-                      <h4
-                        style={{
-                          fontSize: "0.875rem",
-                          marginBottom: "0.5rem",
-                          color: "#9ca3af",
-                        }}
-                      >
-                        Sources ({msg.sources.length}):
-                      </h4>
-                      <div
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "0.5rem",
-                        }}
-                      >
-                        {msg.sources.map((source, idx) => (
-                          <CitationCard
-                            key={idx}
-                            source={{
-                              id: source.chunk_id || `source-${idx}`,
-                              name: source.name,
-                              page: source.page,
-                              section: source.section,
-                              text: source.snippet,
-                              relevance: source.relevance as
-                                | "High"
-                                | "Medium"
-                                | "Low",
-                              document_id: source.document_id,
-                            }}
-                            onPreview={(chunkId) => {
-                              // Use ChunkPreviewModal for detailed preview
-                              if (source.chunk_id) {
-                                setPreviewChunkId(source.chunk_id);
-                              } else {
-                                // Fallback to simple modal
-                                setSelectedSource(source);
-                              }
-                            }}
-                            compact={false}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-
-            {isStreaming && messages[messages.length - 1]?.content === "" && (
-              <div className="message-container assistant">
-                <div
-                  className="message-bubble"
-                  style={{ padding: "0.5rem 1rem" }}
-                >
-                  <div className="loading-dots">
-                    <div className="loading-dot"></div>
-                    <div className="loading-dot"></div>
-                    <div className="loading-dot"></div>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div
-            className="query-box"
-            style={{
-              marginTop: "auto",
-              paddingTop: "1rem",
-              borderTop: "1px solid var(--color-grey-border)",
-            }}
-          >
-            <div style={{ position: "relative" }}>
+            <div className="empty-input-container">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask a question about your documents..."
-                style={{ height: "100px" }}
+                placeholder="Type your message here..."
+                rows={1}
               />
-              <button
-                onClick={isStreaming ? stopStream : handleSend}
-                disabled={!input.trim() && !isStreaming}
-                className="btn btn-dark send-btn"
-                style={{
-                  position: "absolute",
-                  bottom: "1rem",
-                  right: "1rem",
-                  opacity: !input.trim() && !isStreaming ? 0.5 : 1,
-                }}
-              >
-                {isStreaming ? "Stop ■" : "Send ↵"}
-              </button>
+              <div className="empty-actions">
+                <div className="left-actions">
+                  <button onClick={open} title="Upload Document">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+                  </button>
+
+                </div>
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  className="empty-send-btn"
+                >
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        ) : (
+          <>
+            <header>
+              <h2>Chat with your Knowledge Base</h2>
+              <p>
+                Ask questions about your uploaded documents securely and privately.
+              </p>
+            </header>
 
-      {/* Source Content Modal */}
-      <SourceModal
-        source={selectedSource}
-        onClose={() => setSelectedSource(null)}
-      />
+            <section className="chat-grid">
+              {/* Left Panel: Upload & Sources */}
+              <div className="panel upload-panel">
+                <h3>Upload Documents</h3>
+                <p
+                  style={{
+                    fontSize: "0.875rem",
+                    color: "#6b7280",
+                    marginBottom: "1rem",
+                  }}
+                >
+                  Add PDFs to your knowledge graph.
+                </p>
 
-      {/* Chunk Preview Modal */}
-      <ChunkPreviewModal
-        chunkId={previewChunkId}
-        onClose={() => setPreviewChunkId(null)}
-      />
+                <div
+                  {...getRootProps()}
+                  className={`drag-drop ${isDragActive ? "drag-active" : ""}`}
+                  style={{
+                    cursor: isUploading ? "wait" : "pointer",
+                    opacity: isUploading ? 0.6 : 1,
+                  }}
+                  onClick={open}
+                >
+                  <input {...getInputProps()} />
+                  <p style={{ fontWeight: 500 }}>
+                    {isUploading
+                      ? "Uploading..."
+                      : isDragActive
+                        ? "Drop the file here..."
+                        : "Drag & drop or click to upload"}
+                  </p>
+                  <small style={{ color: "#9ca3af" }}>PDF files up to 10MB</small>
+                </div>
+
+                <div style={{ marginTop: "auto" }}>
+                  <h3>Active Documents ({documents.length})</h3>
+                  <ul className="sources-list">
+                    {documents.length === 0 ? (
+                      <li style={{ color: "#9ca3af", fontStyle: "italic" }}>
+                        No documents uploaded yet
+                      </li>
+                    ) : (
+                      documents.map((doc) => (
+                        <li
+                          key={doc.id}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            gap: "0.5rem",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: "0.875rem",
+                              flex: 1,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {doc.filename}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: "0.75rem",
+                              backgroundColor: doc.status?.includes("indexed")
+                                ? "#d1fae5"
+                                : doc.status === "error"
+                                  ? "#fee2e2"
+                                  : "#fef3c7",
+                              color: doc.status?.includes("indexed")
+                                ? "#065f46"
+                                : doc.status === "error"
+                                  ? "#dc2626"
+                                  : "#92400e",
+                              padding: "0.125rem 0.5rem",
+                              borderRadius: "9999px",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {doc.status?.includes("indexed")
+                              ? "Indexed"
+                              : doc.status === "error"
+                                ? "Error"
+                                : "Processing"}
+                          </span>
+                          <button
+                            onClick={() => handleDeleteDocument(doc.id, doc.filename)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              cursor: "pointer",
+                              padding: "0.25rem",
+                              fontSize: "1rem",
+                              color: "#9ca3af",
+                              flexShrink: 0,
+                            }}
+                            onMouseEnter={(e) =>
+                              (e.currentTarget.style.color = "#ef4444")
+                            }
+                            onMouseLeave={(e) =>
+                              (e.currentTarget.style.color = "#9ca3af")
+                            }
+                            title="Delete document"
+                          >
+                            🗑️
+                          </button>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+
+                {/* Chat History */}
+                <div style={{ marginTop: "1.5rem" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "0.5rem",
+                    }}
+                  >
+                    <h3 style={{ margin: 0 }}>Chat History</h3>
+                    <button
+                      onClick={startNewConversation}
+                      style={{
+                        background: "none",
+                        border: "1px solid #374151",
+                        borderRadius: "0.25rem",
+                        padding: "0.25rem 0.5rem",
+                        fontSize: "0.75rem",
+                        cursor: "pointer",
+                        color: "#9ca3af",
+                      }}
+                      title="Start new chat"
+                    >
+                      + New
+                    </button>
+                  </div>
+                  <ul
+                    className="sources-list"
+                    style={{ maxHeight: "200px", overflowY: "auto" }}
+                  >
+                    {conversations.length === 0 ? (
+                      <li style={{ color: "#9ca3af", fontStyle: "italic" }}>
+                        No past conversations
+                      </li>
+                    ) : (
+                      conversations.map((conv) => (
+                        <li
+                          key={conv.id}
+                          onClick={() => loadConversation(conv.id)}
+                          style={{
+                            cursor: "pointer",
+                            padding: "0.5rem",
+                            borderRadius: "0.25rem",
+                            backgroundColor:
+                              conversationId === conv.id
+                                ? "rgba(59, 130, 246, 0.2)"
+                                : "transparent",
+                            borderLeft:
+                              conversationId === conv.id
+                                ? "3px solid #3b82f6"
+                                : "3px solid transparent",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (conversationId !== conv.id) {
+                              e.currentTarget.style.backgroundColor =
+                                "rgba(255,255,255,0.05)";
+                            }
+                          }}
+                          onMouseLeave={(e) => {
+                            if (conversationId !== conv.id) {
+                              e.currentTarget.style.backgroundColor = "transparent";
+                            }
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "0.875rem",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            💬 {conv.title || `Chat ${conv.id.slice(0, 8)}...`}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: "0.7rem",
+                              color: "#6b7280",
+                              marginTop: "0.125rem",
+                            }}
+                          >
+                            {conv.message_count} messages •{" "}
+                            {new Date(conv.created_at).toLocaleDateString()}
+                          </div>
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Right Panel: Chat Interface */}
+              <div className="panel question-panel" style={{ position: "relative" }}>
+                {/* Messages Area */}
+                <div
+                  className="answer-box"
+                  style={{ marginBottom: "1rem", paddingRight: "0.5rem" }}
+                >
+                  {messages.map((msg) => (
+                    <div key={msg.id} className={`message-container ${msg.role}`}>
+                      <div className="message-bubble">
+                        <div className="message-header">
+                          <i className="icon">{msg.role === "user" ? "👤" : "🤖"}</i>
+                          <span>{msg.role === "user" ? "You" : "Assistant"}</span>
+                        </div>
+                        <p style={{ whiteSpace: "pre-wrap" }}>{msg.content}</p>
+
+                        {/* Sources for Assistant Messages */}
+                        {msg.sources && msg.sources.length > 0 && (
+                          <div className="message-sources">
+                            <h4>Sources:</h4>
+                            <ul>
+                              {msg.sources.map((source, idx) => (
+                                <li
+                                  key={idx}
+                                  onClick={() => setSelectedSource(source)}
+                                  style={{
+                                    cursor: "pointer",
+                                    padding: "0.5rem",
+                                    borderRadius: "0.25rem",
+                                    transition: "background-color 0.2s",
+                                  }}
+                                  onMouseEnter={(e) =>
+                                  (e.currentTarget.style.backgroundColor =
+                                    "rgba(255,255,255,0.1)")
+                                  }
+                                  onMouseLeave={(e) =>
+                                  (e.currentTarget.style.backgroundColor =
+                                    "transparent")
+                                  }
+                                  title="Click to view source content"
+                                >
+                                  <span>📄 {source.name}</span>
+                                  {source.page && (
+                                    <span
+                                      style={{ fontSize: "0.75rem", opacity: 0.75 }}
+                                    >
+                                      {" "}
+                                      (Page {source.page})
+                                    </span>
+                                  )}
+                                  <span
+                                    className="relevance-badge"
+                                    style={{
+                                      marginLeft: "0.5rem",
+                                      fontSize: "0.75rem",
+                                      backgroundColor:
+                                        source.relevance === "High"
+                                          ? "#d1fae5"
+                                          : source.relevance === "Medium"
+                                            ? "#fef3c7"
+                                            : "#f3f4f6",
+                                      color:
+                                        source.relevance === "High"
+                                          ? "#065f46"
+                                          : source.relevance === "Medium"
+                                            ? "#92400e"
+                                            : "#374151",
+                                      padding: "0.125rem 0.5rem",
+                                      borderRadius: "9999px",
+                                    }}
+                                  >
+                                    {source.relevance}
+                                  </span>
+                                  <span
+                                    style={{
+                                      marginLeft: "0.5rem",
+                                      fontSize: "0.75rem",
+                                      color: "#60a5fa",
+                                    }}
+                                  >
+                                    🔍 View
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+
+                  {isStreaming && messages[messages.length - 1]?.content === "" && (
+                    <div className="message-container assistant">
+                      <div
+                        className="message-bubble"
+                        style={{ padding: "0.5rem 1rem" }}
+                      >
+                        <div className="loading-dots">
+                          <div className="loading-dot"></div>
+                          <div className="loading-dot"></div>
+                          <div className="loading-dot"></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div
+                  className="query-box"
+                  style={{
+                    marginTop: "auto",
+                    paddingTop: "1rem",
+                    borderTop: "1px solid var(--color-grey-border)",
+                  }}
+                >
+                  <div style={{ position: "relative" }}>
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={handleKeyDown}
+                      placeholder="Ask a question about your documents..."
+                    />
+                    <button
+                      onClick={isStreaming ? stopStream : handleSend}
+                      disabled={!input.trim() && !isStreaming}
+                      className="send-btn"
+                    >
+                      {isStreaming ? "Stop ■" : "Send ↵"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </>
+        )}
+
+        <SourceModal
+          source={selectedSource}
+          onClose={() => setSelectedSource(null)}
+        />
+      </div>
     </main>
   );
 }
