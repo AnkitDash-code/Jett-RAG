@@ -56,13 +56,15 @@ A full-stack **Retrieval-Augmented Generation (RAG)** system with real-time stre
 
 - 🔎 **Search Suggestions** - Autocomplete with entities, documents, and recent queries
 - 📤 **Export/Import** - Conversation export (JSON/Markdown/TXT) with full import support
-- 🖼️ **OCR Processing** - Extract text from images using EasyOCR
+- 🖼️ **Vision LLM (VLM)** - Extract text from images using Granite VLM server
+- 📷 **QR/Barcode Scanning** - Automatic detection and decoding via pyzbar
 - 🏷️ **Entity Extraction** - Automatic extraction and linking of entities
 - 📊 **Chunk Preview** - View document chunks with surrounding context and navigation
 - 🌐 **Distributed LLM** - Load balancing across multiple LLM instances via ngrok
 - 🔄 **Auto Failover** - Automatic retry with different LLM on failure
 - 💊 **Health Monitoring** - Continuous health checks of all LLM workers
 - 🎯 **Smart Routing** - Task-based routing (utility vs chat operations)
+- 👥 **Demo Users** - Pre-configured users for RBAC testing (Engineering, Marketing, HR)
 
 ---
 
@@ -142,7 +144,8 @@ Key Features:
 | Sentence Transformers | Text embeddings                     |
 | LangChain             | Document processing & chunking      |
 | PyMuPDF               | PDF parsing                         |
-| EasyOCR               | Image text extraction               |
+| Vision LLM Client     | Image text extraction via VLM       |
+| pyzbar                | QR code / barcode detection         |
 | python-docx           | Word document parsing               |
 | JWT                   | Authentication tokens               |
 | pyngrok               | Public tunnels for distributed LLMs |
@@ -525,8 +528,16 @@ Code/
 │
 ├── LLM-Backend/
 │   ├── main.py                   # FastAPI wrapper for llama.cpp
-│   ├── mistral-7b-instruct-v0.2.Q4_K_M.gguf  # Model file
+│   ├── koboldcpp.exe             # KoboldCpp binary
+│   ├── mistral-7b-instruct-v0.2.Q4_K_M.gguf  # Chat model
+│   ├── qwen.gguf                 # Utility model
 │   └── requirements.txt
+│
+├── Distributed-LLM-Backend/      # Vision LLM server (Granite VLM)
+│   ├── api.py                    # Vision extraction API
+│   ├── vision_extractor.py       # VLM processing logic
+│   ├── API_USAGE.md              # API documentation
+│   └── Start_Server.bat          # Startup script
 │
 ├── .gitignore
 └── README.md

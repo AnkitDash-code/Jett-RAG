@@ -10,6 +10,7 @@ import uuid
 import hashlib
 import json
 import logging
+import asyncio
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 
@@ -895,7 +896,7 @@ class IngestionService:
             try:
                 summary = await utility_llm.summarize_text(
                     text=combined_text,
-                    max_length=parent_chunk_size // 4,  # Summary is shorter
+                    max_length=parent_chunk_size // 2,  # Increase length to prevent cutoff
                 )
             except Exception as e:
                 logger.warning(f"Failed to generate summary for parent chunk: {e}")
@@ -1045,31 +1046,44 @@ class IngestionService:
         )
         chunks = list(result.scalars().all())
         
+        # Use parallel processing with semaphore to control load
+        semaphore = asyncio.Semaphore(5)  # Process 5 chunks at a time
         entities_count = 0
-        for chunk in chunks:
-            try:
-                result = await extraction_service.extract_from_chunk(
-                    chunk=chunk,
-                    tenant_id=document.tenant_id,
-                    access_level=document.access_level,
-                )
-                entities_count += len(result.entities)
-                
-                # Process and store
-                await extraction_service.process_extraction_result(
-                    result=result,
-                    tenant_id=document.tenant_id,
-                    access_level=document.access_level,
-                    department=document.department,
-                    owner_id=document.owner_id,
-                )
-                
-                chunk.needs_graph_processing = False
-            except Exception as e:
-                logger.warning(f"Entity extraction failed for chunk {chunk.id}: {e}")
+        
+        async def process_chunk(chunk):
+            async with semaphore:
+                try:
+                    result = await extraction_service.extract_from_chunk(
+                        chunk=chunk,
+                        tenant_id=document.tenant_id,
+                        access_level=document.access_level,
+                    )
+                    
+                    # Process and store (this handles DB writes)
+                    # Note: DB writes might need their own concurrency control if using SQLite
+                    # but PostgreSQL/asyncpg handles it well.
+                    await extraction_service.process_extraction_result(
+                        result=result,
+                        tenant_id=document.tenant_id,
+                        access_level=document.access_level,
+                        department=document.department,
+                        owner_id=document.owner_id,
+                    )
+                    
+                    chunk.needs_graph_processing = False
+                    return len(result.entities)
+                except Exception as e:
+                    logger.warning(f"Entity extraction failed for chunk {chunk.id}: {e}")
+                    return 0
+
+        # Execute parallel tasks
+        tasks = [process_chunk(chunk) for chunk in chunks]
+        if tasks:
+            results = await asyncio.gather(*tasks)
+            entities_count = sum(results)
         
         await self.db.commit()
-        logger.info(f"Extracted {entities_count} entities from {len(chunks)} chunks")
+        logger.info(f"Extracted {entities_count} entities from {len(chunks)} chunks (Parallel)")
         return entities_count
     
     async def index_in_graph(self, document: Document) -> None:

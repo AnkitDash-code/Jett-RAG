@@ -44,7 +44,7 @@ async def init_db() -> None:
     """Initialize database tables."""
     async with engine.begin() as conn:
         # Import all models to register them with SQLModel
-        from app.models import user, document, chat  # noqa: F401
+        from app.models import user, document, chat, graph  # noqa: F401
         await conn.run_sync(SQLModel.metadata.create_all)
 
 

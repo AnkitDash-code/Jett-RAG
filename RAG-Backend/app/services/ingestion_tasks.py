@@ -186,6 +186,14 @@ async def handle_document_ingestion(
                 # Add to vector store
                 await ingestion_service.index_in_vector_store(document)
                 
+                # Update document status to INDEXED_LIGHT immediately after vector indexing
+                # This makes the document searchable while GraphRAG continues in background
+                document.status = DocumentStatusEnum.INDEXED_LIGHT
+                document.indexed_at = datetime.utcnow()
+                await db.commit()
+                await db.refresh(document)
+                logger.info(f"Document {document_id} status updated to INDEXED_LIGHT (Vector Ready)")
+                
                 await job_service.save_checkpoint(
                     job_id=job_id,
                     document_id=document_id,
@@ -243,11 +251,10 @@ async def handle_document_ingestion(
                 current_step_number=8,
             )
             
-            # Update document status
-            document.status = DocumentStatusEnum.INDEXED_LIGHT
-            document.indexed_at = datetime.utcnow()
+            # Final touch - status is already INDEXED_LIGHT, but we ensure persistence
+            # If we had a "INDEXED_FULL" status, we would set it here.
+            # For now, just ensuring everything is committed.
             await db.commit()
-            await db.refresh(document)  # Ensure status is persisted
             
             await job_service.save_checkpoint(
                 job_id=job_id,
@@ -255,7 +262,7 @@ async def handle_document_ingestion(
                 step_name=IngestionStep.FINALIZE,
             )
             
-            logger.info(f"Document {document_id} status updated to INDEXED_LIGHT")
+            logger.info(f"Document ingestion (Full) complete: {document_id}")
             
             # Calculate processing time
             end_time = datetime.utcnow()

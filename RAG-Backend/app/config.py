@@ -58,10 +58,10 @@ class Settings(BaseSettings):
     # Vector Database (FAISS - current implementation)
     # Phase 2: Weaviate with Docker for production hybrid search
     EMBEDDING_MODEL: str = "all-MiniLM-L6-v2"  # Fallback sentence-transformers model
-    EMBEDDING_DIMENSION: int = 1024  # Qwen3-Embedding-0.6B dimension
+    EMBEDDING_DIMENSION: int = 384  # all-MiniLM-L6-v2 dimension (change to 1024 if using Qwen3)
     
     # KoboldCpp Local Models (GGUF)
-    USE_KOBOLD_EMBEDDING: bool = True  # Use koboldcpp for embeddings
+    USE_KOBOLD_EMBEDDING: bool = False  # Disabled - using sentence-transformers fallback
     EMBEDDING_KOBOLD_URL: str = "http://localhost:5001"  # Qwen3-Embedding server
     
     # GraphRAG Settings (rustworkx + SQLite)
@@ -89,8 +89,8 @@ class Settings(BaseSettings):
     PARENT_CHUNK_SIZE: int = 1024  # Parent chunk token size
     HIERARCHY_LEVELS: int = 2  # 0=leaf, 1=section, 2=document
     
-    # Phase 5: Auto-Retry Self-Reflection
-    ENABLE_AUTO_RETRY: bool = True
+    # Phase 5: Auto-Retry Self-Reflection (DISABLED - query expansion already runs in main pipeline)
+    ENABLE_AUTO_RETRY: bool = False
     MAX_RETRY_ATTEMPTS: int = 2
     RETRY_RELEVANCE_THRESHOLD: float = 0.6
     
@@ -135,7 +135,7 @@ class Settings(BaseSettings):
     # Hybrid Search Settings
     HYBRID_ALPHA: float = 0.5  # Weight for vector vs BM25 (1.0 = pure vector, 0.0 = pure BM25)
     ENABLE_HYBRID_SEARCH: bool = True
-    ENABLE_CROSS_ENCODER: bool = False
+    ENABLE_CROSS_ENCODER: bool = True  # Enable reranker (ms-marco-MiniLM)
     CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     RERANK_CANDIDATES: int = 30  # Number of candidates to rerank
     

@@ -3,15 +3,13 @@ Document API endpoints.
 POST /documents/upload, GET /documents, GET /documents/{id}, etc.
 """
 import uuid
-import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db, async_session_maker
+from app.database import get_db
 from app.services.document_service import DocumentService
-from app.services.ingestion_service import IngestionService
 from app.schemas.document import (
     DocumentUploadResponse,
     DocumentResponse,
@@ -25,16 +23,19 @@ router = APIRouter()
 
 def document_to_response(doc) -> DocumentResponse:
     """Convert Document model to response schema."""
+    # Safely handle status (Enum or str)
+    status_val = doc.status.value if hasattr(doc.status, "value") else str(doc.status)
+    
     return DocumentResponse(
         id=str(doc.id),
         filename=doc.original_filename,  # Use original filename for display
         original_filename=doc.original_filename,
-        file_size=doc.file_size,
-        mime_type=doc.mime_type,
+        file_size=doc.file_size or 0,
+        mime_type=doc.mime_type or "application/octet-stream",
         title=doc.title,
         description=doc.description,
         tags=doc.tags.split(",") if doc.tags else [],
-        status=doc.status.value,
+        status=status_val,
         access_level=doc.access_level,
         page_count=doc.page_count,
         chunk_count=doc.chunk_count,
@@ -81,42 +82,11 @@ async def upload_document(
         tags=tag_list,
     )
     
-    # Commit the document BEFORE starting background task
+    # Commit the document BEFORE returning
+    # NOTE: Background processing is now handled by the task queue via
+    # document_service.upload_document() which calls enqueue_document_ingestion()
+    # Do NOT create additional asyncio tasks here - it causes duplicate processing!
     await db.commit()
-    
-    # Queue background processing with its own session
-    document_id = document.id
-    doc_filename = document.original_filename
-    
-    print(f">>> QUEUING BACKGROUND TASK for {doc_filename}")
-
-    async def process_document():
-        print(f">>> BACKGROUND TASK STARTED for {doc_filename}")
-        import asyncio
-        import logging
-        log = logging.getLogger(__name__)
-        
-        log.info(f"[BACKGROUND] Starting background task for document: {doc_filename}")
-        
-        # Small delay to ensure transaction is fully visible
-        await asyncio.sleep(0.1)
-        
-        async with async_session_maker() as bg_session:
-            try:
-                print(f">>> CREATED DB SESSION for {doc_filename}")
-                log.info(f"[BACKGROUND] Created DB session, starting ingestion...")
-                ingestion = IngestionService(bg_session)
-                await ingestion.process_document(document_id)
-                await bg_session.commit()
-                print(f">>> PROCESSING COMPLETE for {doc_filename}")
-                log.info(f"[BACKGROUND] Committed successfully for: {doc_filename}")
-            except Exception as e:
-                print(f">>> ERROR: {e}")
-                await bg_session.rollback()
-                log.error(f"[BACKGROUND] Processing failed for {doc_filename}: {e}", exc_info=True)
-    
-    # Use asyncio.create_task instead of BackgroundTasks for reliable async execution
-    asyncio.create_task(process_document())
     
     return DocumentUploadResponse(
         id=str(document.id),

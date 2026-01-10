@@ -66,6 +66,8 @@ class QueryClassificationService:
         Returns:
             QueryClassification with type, complexity, and routing
         """
+        if query is None:
+            query = ""
         query = query.strip()
         
         if not query:

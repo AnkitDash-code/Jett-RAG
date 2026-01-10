@@ -33,19 +33,19 @@ def check_already_running():
 def main():
     # Check if already running
     if check_already_running():
-        print("✅ KoboldCpp embedding server already running on port 5001")
+        print("[OK] KoboldCpp embedding server already running on port 5001")
         return True
     
     if not os.path.exists(KOBOLDCPP_PATH):
-        print(f"❌ KoboldCpp executable not found: {KOBOLDCPP_PATH}")
+        print(f"[ERROR] KoboldCpp executable not found: {KOBOLDCPP_PATH}")
         print("   Please download KoboldCpp and place it in the LLM-Backend folder")
         return False
     
     if not os.path.exists(SETTINGS_PATH):
-        print(f"❌ Settings file not found: {SETTINGS_PATH}")
+        print(f"[ERROR] Settings file not found: {SETTINGS_PATH}")
         return False
     
-    print(f"🚀 Launching KoboldCpp embedding server...")
+    print(f"[STARTING] Launching KoboldCpp embedding server...")
     print(f"   Executable: {KOBOLDCPP_PATH}")
     print(f"   Settings:   {SETTINGS_PATH}")
     
@@ -67,22 +67,22 @@ def main():
                 start_new_session=True
             )
         
-        print("✅ KoboldCpp embedding server started in background")
+        print("[OK] KoboldCpp embedding server started in background")
         print("   Waiting for server to be ready...")
         
         # Wait for server to start (up to 30 seconds)
         for i in range(30):
             time.sleep(1)
             if check_already_running():
-                print(f"✅ Embedding server ready on port 5001 (took {i+1}s)")
+                print(f"[OK] Embedding server ready on port 5001 (took {i+1}s)")
                 return True
             print(f"   Still waiting... ({i+1}s)")
         
-        print("⚠️  Server started but not responding yet. It may still be loading the model.")
+        print("[WARNING] Server started but not responding yet. It may still be loading the model.")
         return True
         
     except Exception as e:
-        print(f"❌ Failed to start KoboldCpp: {e}")
+        print(f"[ERROR] Failed to start KoboldCpp: {e}")
         return False
 
 if __name__ == "__main__":

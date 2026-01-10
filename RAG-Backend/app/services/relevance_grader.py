@@ -46,8 +46,8 @@ class RelevanceGrader:
     
     def __init__(self):
         self._utility_llm = get_utility_llm()
-        self._min_confidence_threshold = 0.3
-        self._retry_threshold = 0.4
+        self._min_confidence_threshold = 0.2  # Lowered for more lenient grading
+        self._retry_threshold = 0.25  # Lowered - only retry when very low confidence
         logger.info(f"RelevanceGrader initialized (LLM: {self._utility_llm.is_available()})")
     
     async def grade(
@@ -87,17 +87,8 @@ class RelevanceGrader:
                 should_retry=False,
             )
         
-        # Try LLM grading
-        if self._utility_llm.is_available():
-            try:
-                llm_result = await self._utility_llm.grade_relevance(
-                    query, chunks, threshold
-                )
-                return self._process_llm_result(llm_result, chunks)
-            except Exception as e:
-                logger.warning(f"LLM grading failed: {e}")
-        
-        # Fallback to heuristic grading
+        # Skip LLM grading - cross-encoder reranker already handles relevance scoring
+        # Just use lightweight heuristic to confirm chunks are topically relevant
         return self._heuristic_grade(query, chunks, threshold)
     
     def _process_llm_result(

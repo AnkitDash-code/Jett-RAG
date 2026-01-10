@@ -28,20 +28,31 @@ client = OpenAI(
 class ChatRequest(BaseModel):
     query: str
     context: str = "No context provided."
-    stream: bool = False  # New: streaming option
+    stream: bool = False
+    system_instruction: str | None = None  # Optional override
+    max_tokens: int = 2048  # Prevent cutoff by default
 
 
 # 4. Create the Chat Endpoint (non-streaming)
 @app.post("/generate")
 async def generate_response(request: ChatRequest):
     try:
-        # System Prompt: Strict instructions for the AI
-        system_instruction = (
-            "You are a helpful and precise assistant for an internal knowledge portal. "
-            "Answer the user's question based ONLY on the provided context below. "
-            "If the answer is not in the context, state that you do not know. "
-            "Do not hallucinate facts."
-        )
+        # Determine strictness based on whether it's a RAG query or Utility task
+        if request.system_instruction:
+            # Custom instruction (Utility Task) - trust the caller
+            system_txt = request.system_instruction
+        else:
+            # Default RAG behavior - Strict Document Mode
+            system_txt = (
+                "You are a document-based assistant for an internal knowledge portal. "
+                "STRICT RULES:\n"
+                "1. Answer ONLY using information from the provided context below.\n"
+                "2. If the context does not contain the answer, say 'I could not find this information in the uploaded documents.'\n"
+                "3. NEVER use your own knowledge or training data. This is an OFFLINE system.\n"
+                "4. Cite sources using the exact document names from the context, like [Source: filename.pdf, Page X].\n"
+                "5. Do not mention Wikipedia, web sources, or external references.\n"
+                "6. If multiple documents contain relevant info, cite all of them."
+            )
 
         # User Prompt: The actual data
         formatted_prompt = f"""
@@ -55,7 +66,7 @@ async def generate_response(request: ChatRequest):
         # If streaming requested, use streaming endpoint
         if request.stream:
             return StreamingResponse(
-                stream_response(system_instruction, formatted_prompt),
+                stream_response(system_txt, formatted_prompt, max_tokens=request.max_tokens),
                 media_type="text/event-stream",
             )
 
@@ -65,11 +76,11 @@ async def generate_response(request: ChatRequest):
         response = client.chat.completions.create(
             model="local-model",
             messages=[
-                {"role": "system", "content": system_instruction},
+                {"role": "system", "content": system_txt},
                 {"role": "user", "content": formatted_prompt}
             ],
             temperature=0.1,
-            max_tokens=1024,
+            max_tokens=request.max_tokens,
             stream=False
         )
 
@@ -83,7 +94,7 @@ async def generate_response(request: ChatRequest):
 
 
 # 5. Streaming response generator - synchronous
-def stream_response(system_instruction: str, formatted_prompt: str):
+def stream_response(system_instruction: str, formatted_prompt: str, max_tokens: int = 2048):
     """Stream tokens from llama.cpp as Server-Sent Events.
     
     Uses synchronous generator which FastAPI handles correctly.
@@ -97,7 +108,7 @@ def stream_response(system_instruction: str, formatted_prompt: str):
                 {"role": "user", "content": formatted_prompt}
             ],
             temperature=0.1,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             stream=True  # Enable streaming
         )
         
@@ -122,12 +133,19 @@ def stream_response(system_instruction: str, formatted_prompt: str):
 @app.post("/generate/stream")
 async def generate_stream(request: ChatRequest):
     """Streaming endpoint for real-time token output."""
-    system_instruction = (
-        "You are a helpful and precise assistant for an internal knowledge portal. "
-        "Answer the user's question based ONLY on the provided context below. "
-        "If the answer is not in the context, state that you do not know. "
-        "Do not hallucinate facts."
-    )
+    if request.system_instruction:
+        system_txt = request.system_instruction
+    else:
+        system_txt = (
+            "You are a document-based assistant for an internal knowledge portal. "
+            "STRICT RULES:\n"
+            "1. Answer ONLY using information from the provided context below.\n"
+            "2. If the context does not contain the answer, say 'I could not find this information in the uploaded documents.'\n"
+            "3. NEVER use your own knowledge or training data. This is an OFFLINE system.\n"
+            "4. Cite sources using the exact document names from the context, like [Source: filename.pdf, Page X].\n"
+            "5. Do not mention Wikipedia, web sources, or external references.\n"
+            "6. If multiple documents contain relevant info, cite all of them."
+        )
     
     formatted_prompt = f"""
     ### Context:
@@ -138,7 +156,7 @@ async def generate_stream(request: ChatRequest):
     """
     
     return StreamingResponse(
-        stream_response(system_instruction, formatted_prompt),
+        stream_response(system_txt, formatted_prompt, max_tokens=request.max_tokens),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",

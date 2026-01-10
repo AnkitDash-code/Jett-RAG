@@ -200,7 +200,8 @@ class EnhancedRetrievalService:
             result.conversation_context = self._context_service.get_formatted_context(context)
             
             # Use resolved query for subsequent steps
-            query = context.resolved_query
+            if context.resolved_query:
+                query = context.resolved_query
         
         result.context_ms = int((time.perf_counter() - t0) * 1000)
         

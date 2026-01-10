@@ -205,6 +205,7 @@ class LLMClient:
             if e.response.status_code == 404:
                 # Streaming endpoint not available, fall back to simulated streaming
                 logger.warning("Streaming endpoint not available, using simulated streaming")
+                import asyncio
                 result = await self.generate(
                     messages=messages,
                     temperature=temperature,
@@ -217,6 +218,8 @@ class LLMClient:
                     if i > 0:
                         yield " "
                     yield word
+                    # Add small delay for realistic streaming effect
+                    await asyncio.sleep(0.02)  # 20ms per word
             else:
                 raise
         except httpx.HTTPError as e:
@@ -230,12 +233,20 @@ class PromptBuilder:
     Handles context formatting, citation instructions, and conversation history.
     """
     
-    SYSTEM_PROMPT = """You are a helpful AI assistant. Answer questions clearly using the provided context when relevant.
+    SYSTEM_PROMPT = """You are a strictly document-based AI assistant.
+    
+STRICT OFFLINE MODE RULES:
+1. Answer ONLY using the information present in the DOCUMENT CONTEXT below.
+2. If the answer is NOT in the context, state: "I cannot find this information in the provided documents."
+3. DO NOT use your internal knowledge, training data, or external web info.
+4. DO NOT hallucinate facts. If it's not in the text, it doesn't exist.
+5. Cite your sources for every fact using format: [Source: filename, Page X].
 
-CONTEXT:
+DOCUMENT CONTEXT:
 {context}
 
-Use the context above to answer when applicable, and cite sources with [Source: document_name]. If the context doesn't fully answer the question, provide a helpful response based on what's available."""
+{extra_context}
+Based ONLY on the context above, answer the question:"""
 
     def build_messages(
         self,
@@ -243,6 +254,9 @@ Use the context above to answer when applicable, and cite sources with [Source: 
         context_chunks: list[Dict[str, Any]],
         conversation_history: Optional[list[Dict[str, str]]] = None,
         system_prompt: Optional[str] = None,
+        graph_context: Optional[str] = None,
+        memory_context: Optional[str] = None,
+        hierarchy_context: Optional[list[Dict[str, Any]]] = None,
     ) -> list[Dict[str, str]]:
         """
         Build the message list for LLM completion.
@@ -252,12 +266,34 @@ Use the context above to answer when applicable, and cite sources with [Source: 
             context_chunks: Retrieved chunks with metadata
             conversation_history: Previous messages in conversation
             system_prompt: Optional custom system prompt
+            graph_context: Entity relationships and community summaries
+            memory_context: Past conversation memories
+            hierarchy_context: Parent chunk summaries
         """
-        # Format context
+        # Format main document context
         context_text = self._format_context(context_chunks)
         
+        # Build extra context sections
+        extra_sections = []
+        
+        if graph_context:
+            extra_sections.append(f"KNOWLEDGE GRAPH CONTEXT:\n{graph_context}")
+        
+        if memory_context:
+            extra_sections.append(f"RELEVANT PAST INTERACTIONS:\n{memory_context}")
+        
+        if hierarchy_context:
+            hierarchy_text = self._format_hierarchy_context(hierarchy_context)
+            if hierarchy_text:
+                extra_sections.append(f"BROADER DOCUMENT CONTEXT:\n{hierarchy_text}")
+        
+        extra_context = "\n\n".join(extra_sections) if extra_sections else ""
+        
         # Build system prompt
-        system = (system_prompt or self.SYSTEM_PROMPT).format(context=context_text)
+        system = (system_prompt or self.SYSTEM_PROMPT).format(
+            context=context_text,
+            extra_context=extra_context
+        )
         
         messages = [{"role": "system", "content": system}]
         
@@ -270,6 +306,20 @@ Use the context above to answer when applicable, and cite sources with [Source: 
         messages.append({"role": "user", "content": query})
         
         return messages
+    
+    def _format_hierarchy_context(self, hierarchy_context: list[Dict[str, Any]]) -> str:
+        """Format hierarchical parent chunks into context string."""
+        if not hierarchy_context:
+            return ""
+        
+        parts = []
+        for item in hierarchy_context:
+            level = item.get("level", 1)
+            text = item.get("text", "")
+            level_name = "Section" if level == 1 else "Document"
+            parts.append(f"[{level_name} Summary]: {text}")
+        
+        return "\n".join(parts)
     
     def _format_context(self, chunks: list[Dict[str, Any]]) -> str:
         """Format chunks into context string."""

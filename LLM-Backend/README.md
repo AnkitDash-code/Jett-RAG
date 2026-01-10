@@ -1,78 +1,73 @@
-# Offline RAG Project (KoboldCpp + GGUF)
+# LLM Backend (KoboldCpp + GGUF)
 
-This repo is set up to run a local LLM via **KoboldCpp** using a **GGUF** model file.
+Local LLM inference server using **KoboldCpp** with **GGUF** models for the GraphRAG Knowledge Portal.
 
-## What you need to download
+## 📦 Contents
 
-1. **KoboldCpp for Windows** (`koboldcpp.exe`)
+| File | Purpose |
+|------|---------|
+| `koboldcpp.exe` | KoboldCpp inference engine |
+| `mistral-7b-instruct-v0.2.Q4_K_M.gguf` | Main chat model (~4.4 GB) |
+| `qwen.gguf` | Utility model for query expansion (~2 GB) |
+| `main.py` | FastAPI wrapper with auto-start |
+| `Settings.kcpps` | KoboldCpp configuration |
+| `start.bat` / `start.sh` | Startup scripts |
 
-   - Download from: https://github.com/LostRuins/koboldcpp/releases/tag/v1.103
+## 🚀 Quick Start
 
-2. **Mistral 7B Instruct v0.2 (GGUF)**
-   - Model hub page: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+### Windows
+```bash
+# One-click start (auto-configures and launches)
+start.bat
+```
 
----
+### Manual
+```bash
+cd LLM-Backend
+myenv\Scripts\activate
+python main.py
+```
 
-## Step 1 — Download `koboldcpp.exe`
+Server runs on: **http://localhost:8000**
 
-1. Open the KoboldCpp release page:
-   - https://github.com/LostRuins/koboldcpp/releases/tag/v1.103
-2. In the **Assets** section, download the Windows executable (commonly named something like `koboldcpp.exe` or similar).
-3. Place `koboldcpp.exe` in the LLM-Backend repo root.
+## 📋 Features
 
-Recommended layout for this repo:
+- ✅ **Auto-start** - Automatically launches KoboldCpp on startup
+- ✅ **Dual models** - Chat model + utility model support
+- ✅ **Health checks** - `/health` endpoint for monitoring
+- ✅ **OpenAI-compatible API** - Works with standard LLM clients
+- ✅ **GPU acceleration** - CUDA support for NVIDIA GPUs
 
-- Put it in a new folder at the repo root, for example:
-  - `LLM-Backend/koboldcpp.exe`
+## ⬇️ Model Downloads
 
-(You can also place it elsewhere; just remember the path you chose.)
+### 1. KoboldCpp
+- Download: https://github.com/LostRuins/koboldcpp/releases
+- Place `koboldcpp.exe` in this folder
 
----
+### 2. Chat Model (Mistral 7B)
+- Download: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+- File: `mistral-7b-instruct-v0.2.Q4_K_M.gguf` (~4.4 GB)
 
-## Step 2 — Download a GGUF model file
+### 3. Utility Model (Optional)
+- For query expansion and utility tasks
+- Smaller model like Qwen 2.5B recommended
 
-1. Open the model page:
-   - https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
-2. Choose **one** `.gguf` file to download.
+## 🔧 Configuration
 
-Notes on choosing a file:
+Edit `Settings.kcpps` for:
+- GPU layers (`--gpulayers`)
+- Context size (`--contextsize`)
+- Port (`--port`)
 
-- Smaller quantizations (e.g., `Q4_...`) generally use less RAM/VRAM and run faster.
-- Larger quantizations (e.g., `Q6`, `Q8`) are higher quality but need more memory.
+## 📡 API Endpoints
 
-Recommended layout for this repo:
+| Endpoint | Description |
+|----------|-------------|
+| `POST /v1/chat/completions` | OpenAI-compatible chat |
+| `POST /v1/completions` | Text completion |
+| `GET /health` | Health check |
 
-- Put the `.gguf` file in:
-  - `./LLM-Backend/mistral-7b-instruct-v0.2.Q4_K_M.gguf`
+## 🔗 Links
 
-This repo already expects/contains a file named:
-
-- `LLM-Backend/mistral-7b-instruct-v0.2.Q4_K_M.gguf`
-
-If you download a different GGUF filename, either:
-
-- rename it to match what your scripts/config expect, or
-- update your config/scripts to point at the new filename.
-
----
-
-## Quick sanity check (optional)
-
-From the repo root, confirm you have:
-
-- `koboldcpp/koboldcpp.exe`
-- `backend_api/<your-model>.gguf`
-
----
-
-## Troubleshooting
-
-- If Windows SmartScreen blocks `koboldcpp.exe`, you may need to click **More info → Run anyway**.
-- If the model fails to load, you likely need a smaller quantization (less memory use) or to close other memory-heavy apps.
-
----
-
-## Links
-
-- KoboldCpp release (v1.103): https://github.com/LostRuins/koboldcpp/releases/tag/v1.103
-- Mistral 7B Instruct v0.2 GGUF (TheBloke): https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF
+- KoboldCpp: https://github.com/LostRuins/koboldcpp
+- Mistral 7B GGUF: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF

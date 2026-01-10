@@ -8,7 +8,7 @@ This unified FastAPI backend implements a complete RAG (Retrieval-Augmented Gene
 
 **Key Features:**
 
-- 📚 Multi-format document support (PDF, DOCX, TXT, Images with OCR)
+- 📚 Multi-format document support (PDF, DOCX, TXT, Images with VLM)
 - 🕸️ **GraphRAG** with rustworkx for entity-aware retrieval
 - 🧠 **Supermemory** system (episodic + semantic memory)
 - 🔍 Hybrid search (FAISS vector + BM25 keyword)
@@ -17,6 +17,8 @@ This unified FastAPI backend implements a complete RAG (Retrieval-Augmented Gene
 - 🛡️ Production-ready (circuit breakers, audit logs, health checks)
 - 💬 Real-time streaming (SSE + WebSocket)
 - ⚡ **Offline-ready** - Auto-caches models on first run
+- 📷 **QR/Barcode scanning** - Auto-detect and decode via pyzbar
+- 👥 **Demo users** - Pre-configured RBAC users on startup
 
 ---
 

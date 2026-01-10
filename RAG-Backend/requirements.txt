@@ -82,3 +82,6 @@ PyMuPDF>=1.23.0  # PDF rendering for OCR (no poppler needed)
 # Optional: EasyOCR (GPU-accelerated OCR using existing PyTorch)
 easyocr>=1.7.0
 # pdf2image>=1.16.0  # Fallback PDF converter (requires poppler-utils installed on system)
+
+# QR/Barcode Scanning
+pyzbar>=0.1.9

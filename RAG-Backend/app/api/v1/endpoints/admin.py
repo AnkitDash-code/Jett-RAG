@@ -4,6 +4,10 @@ GET /admin/metrics, /admin/logs, /admin/users, /admin/documents
 """
 import uuid
 from typing import Optional
+import logging
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, Query, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -759,6 +763,8 @@ async def get_graph_visualization(
     community_id: Optional[str] = Query(None, description="Filter by community ID"),
     limit: int = Query(100, ge=10, le=500, description="Maximum entities to return"),
     include_orphans: bool = Query(False, description="Include entities with no relationships"),
+    include_documents: bool = Query(False, description="Include document nodes"),
+    include_users: bool = Query(False, description="Include user nodes"),
     current_user: CurrentUser = Depends(require_admin()),
     db: AsyncSession = Depends(get_db),
 ):
@@ -773,6 +779,10 @@ async def get_graph_visualization(
     from sqlalchemy import select, func, or_
     from sqlalchemy.exc import OperationalError
     from app.models.graph import Entity, EntityType, EntityRelationship, CommunityMembership
+    from app.models.document import Document
+    from app.models.user import User
+
+    
     
     try:
         # Build entity query
@@ -827,49 +837,96 @@ async def get_graph_visualization(
         # Get unique community count
         unique_communities = set(str(c) for c in comm_memberships.values() if c)
         
+        # Construct base response lists
+        entities_data = [
+            {
+                "id": str(e.id),
+                "name": e.name,
+                "type": e.entity_type.value.upper(),
+                "community_id": str(comm_memberships.get(e.id)) if comm_memberships.get(e.id) else None,
+                "connection_count": e.relationship_count,
+                "mention_count": e.mention_count,
+                "centrality": round(e.centrality_score, 4),
+            }
+            for e in entities
+        ]
+
+        relationships_data = [
+            {
+                "source_id": str(r.source_entity_id),
+                "target_id": str(r.target_entity_id),
+                "relationship_type": r.relationship_type.value.upper(),
+                "weight": r.weight,
+                "confidence": r.confidence,
+            }
+            for r in valid_relationships
+        ]
+        
+        # Add RBAC Nodes (Documents & Users)
+        documents = []
+        if include_documents:
+            # Fetch recent documents
+            doc_result = await db.execute(select(Document).limit(limit))
+            documents = doc_result.scalars().all()
+            for doc in documents:
+                entities_data.append({
+                    "id": str(doc.id),
+                    "name": doc.title or doc.original_filename,
+                    "type": "DOCUMENT",
+                    "community_id": None,
+                    "connection_count": 1,
+                    "access_level": doc.access_level,
+                    "owner_id": str(doc.owner_id) if doc.owner_id else None,
+                })
+        
+        if include_users:
+            # Fetch users
+            user_result = await db.execute(select(User).limit(limit))
+            users = user_result.scalars().all()
+            for user in users:
+                entities_data.append({
+                    "id": str(user.id),
+                    "name": user.email, # Use email as name
+                    "type": "USER",
+                    "community_id": None,
+                    "connection_count": 5,
+                    "role": "admin" if user.is_admin else "user",
+                })
+                
+                # Add edges for Owned Documents
+                if include_documents and documents:
+                    user_docs = [d for d in documents if d.owner_id == user.id]
+                    for d in user_docs:
+                        relationships_data.append({
+                            "source_id": str(user.id),
+                            "target_id": str(d.id),
+                            "relationship_type": "OWNS",
+                            "weight": 1.0,
+                            "confidence": 1.0,
+                        })
+
         return {
-            "entities": [
-                {
-                    "id": str(e.id),
-                    "name": e.name,
-                    "type": e.entity_type.value.upper(),
-                    "community_id": str(comm_memberships.get(e.id)) if comm_memberships.get(e.id) else None,
-                    "connection_count": e.relationship_count,
-                    "mention_count": e.mention_count,
-                    "centrality": round(e.centrality_score, 4),
-                }
-                for e in entities
-            ],
-            "relationships": [
-                {
-                    "source_id": str(r.source_entity_id),
-                    "target_id": str(r.target_entity_id),
-                    "relationship_type": r.relationship_type.value.upper(),
-                    "weight": r.weight,
-                    "confidence": r.confidence,
-                }
-                for r in valid_relationships
-            ],
+            "entities": entities_data,
+            "relationships": relationships_data,
             "stats": {
-                "total_entities": len(entities),
-                "total_relationships": len(valid_relationships),
+                "total_entities": len(entities_data),
+                "total_relationships": len(relationships_data),
                 "communities": len(unique_communities),
             }
         }
         
-    except OperationalError as e:
-        # Handle case where graph tables don't exist yet (fresh database)
-        if "no such table" in str(e):
-            return {
-                "entities": [],
-                "relationships": [],
-                "stats": {
-                    "total_entities": 0,
-                    "total_relationships": 0,
-                    "communities": 0,
-                }
+    except Exception as e:
+        logger.exception(f"Error generating graph visualization: {e}")
+        # Return empty graph instead of failing (prevents frontend from showing mock data)
+        return {
+            "entities": [],
+            "relationships": [],
+            "stats": {
+                "total_entities": 0,
+                "total_relationships": 0,
+                "communities": 0,
             }
-        raise
+        }
 
 
 @router.post("/memory/consolidate/{user_id}")

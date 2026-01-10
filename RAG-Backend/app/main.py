@@ -33,29 +33,30 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# TEMPORARILY DISABLED: Qwen embedding model
 # Start KoboldCpp embedding server at startup (if not already running)
-try:
-    embedding_launcher = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'init_embedding.py'))
-    if os.path.exists(embedding_launcher):
-        logger.info(f"Starting KoboldCpp embedding server...")
-        # Run synchronously to ensure server is ready before app starts
-        result = subprocess.run(
-            [sys.executable, embedding_launcher],
-            cwd=os.path.dirname(embedding_launcher),
-            capture_output=True,
-            text=True,
-            timeout=60  # Wait up to 60 seconds for server to start
-        )
-        if result.returncode == 0:
-            logger.info("KoboldCpp embedding server started successfully")
-        else:
-            logger.warning(f"Embedding server startup issue: {result.stderr}")
-    else:
-        logger.warning(f"init_embedding.py not found at {embedding_launcher}")
-except subprocess.TimeoutExpired:
-    logger.warning("Embedding server startup timed out, continuing anyway...")
-except Exception as e:
-    logger.warning(f"Failed to launch embedding server: {e}")
+# try:
+#     embedding_launcher = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'init_embedding.py'))
+#     if os.path.exists(embedding_launcher):
+#         logger.info(f"Starting KoboldCpp embedding server...")
+#         # Run synchronously to ensure server is ready before app starts
+#         result = subprocess.run(
+#             [sys.executable, embedding_launcher],
+#             cwd=os.path.dirname(embedding_launcher),
+#             capture_output=True,
+#             text=True,
+#             timeout=60  # Wait up to 60 seconds for server to start
+#         )
+#         if result.returncode == 0:
+#             logger.info("KoboldCpp embedding server started successfully")
+#         else:
+#             logger.warning(f"Embedding server startup issue: {result.stderr}")
+#     else:
+#         logger.warning(f"init_embedding.py not found at {embedding_launcher}")
+# except subprocess.TimeoutExpired:
+#     logger.warning("Embedding server startup timed out, continuing anyway...")
+# except Exception as e:
+#     logger.warning(f"Failed to launch embedding server: {e}")
 
 
 @asynccontextmanager
@@ -69,9 +70,9 @@ async def lifespan(app: FastAPI):
     from app.utils.model_cache import ensure_models_cached
     ensure_models_cached()
     
-    # Preload embedding model on GPU for fast inference
-    from app.services.retrieval_service import EmbeddingService
-    EmbeddingService.preload_model()
+    # TEMPORARILY DISABLED: Qwen embedding model preloading
+    # from app.services.retrieval_service import EmbeddingService
+    # EmbeddingService.preload_model()
     
     # Initialize database
     await init_db()
@@ -108,7 +109,7 @@ async def lifespan(app: FastAPI):
 
 
 async def create_default_admin():
-    """Create a default admin user if no admin exists."""
+    """Create a default admin user and demo users if they don't exist."""
     from sqlmodel import select
     from app.models.user import User
     from app.services.auth_service import AuthService
@@ -138,6 +139,33 @@ async def create_default_admin():
                 logger.warning(f"Could not create default admin: {e}")
         else:
             logger.info(f"Admin user exists: {admin.email}")
+        
+        # Create demo users for RBAC testing
+        demo_users = [
+            {"email": "alice@engineering.com", "password": "demo123", "name": "Alice Engineer", "department": "Engineering", "access_levels": "public,internal,confidential"},
+            {"email": "bob@marketing.com", "password": "demo123", "name": "Bob Marketer", "department": "Marketing", "access_levels": "public,internal"},
+            {"email": "carol@hr.com", "password": "demo123", "name": "Carol HR", "department": "HR", "access_levels": "public"},
+        ]
+        
+        auth_service = AuthService(session)
+        for user_data in demo_users:
+            existing = await session.execute(
+                select(User).where(User.email == user_data["email"])
+            )
+            if not existing.scalars().first():
+                try:
+                    new_user = await auth_service.create_user(
+                        email=user_data["email"],
+                        password=user_data["password"],
+                        name=user_data["name"],
+                    )
+                    new_user.department = user_data["department"]
+                    new_user.allowed_access_levels = user_data["access_levels"]
+                    session.add(new_user)
+                    await session.commit()
+                    logger.info(f"Demo user created: {user_data['email']} / {user_data['password']}")
+                except Exception as e:
+                    logger.warning(f"Could not create demo user {user_data['email']}: {e}")
 
 
 def create_application() -> FastAPI:
@@ -153,13 +181,14 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
     
-    # CORS middleware - allow all origins for dev/tunneling
-    # When allow_origins is ["*"], we must set allow_credentials=False
-    # OR use allow_origin_regex to match all while keeping credentials
+    # CORS middleware - allow explicitly for credentials
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Allow all origins for port-forwarding
-        allow_credentials=False,  # Must be False when using wildcard origins
+        allow_origins=[
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+        ],
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=["*"],

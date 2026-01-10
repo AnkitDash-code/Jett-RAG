@@ -108,6 +108,8 @@ class QueryPreprocessor:
         - Trimming whitespace
         - Basic cleaning
         """
+        if query is None:
+            return ""
         normalized = query.strip().lower()
         # Remove multiple spaces
         normalized = " ".join(normalized.split())

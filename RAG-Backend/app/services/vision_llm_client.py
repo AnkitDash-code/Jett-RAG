@@ -28,12 +28,18 @@ class VisionResult:
     text: str
     description: str
     confidence: float
+    qr_codes: List[Dict[str, str]] = None  # List of detected QR/barcodes
+    
+    def __post_init__(self):
+        if self.qr_codes is None:
+            self.qr_codes = []
     
     def to_dict(self) -> Dict[str, Any]:
         return {
             "text": self.text,
             "description": self.description,
             "confidence": self.confidence,
+            "qr_codes": self.qr_codes,
         }
 
 
@@ -93,6 +99,49 @@ class VisionLLMClient:
         """Check if Vision LLM is enabled."""
         return self.enabled
     
+    def _scan_barcodes(self, image_data: bytes) -> List[Dict[str, str]]:
+        """
+        Scan QR codes and barcodes from image bytes using pyzbar.
+        
+        Args:
+            image_data: Raw image bytes
+            
+        Returns:
+            List of dicts with 'type' and 'data' for each detected code
+        """
+        try:
+            from pyzbar.pyzbar import decode as pyzbar_decode
+            from PIL import Image
+            
+            img = Image.open(io.BytesIO(image_data))
+            decoded = pyzbar_decode(img)
+            
+            results = []
+            for d in decoded:
+                results.append({
+                    "type": d.type,  # QRCODE, EAN13, CODE128, etc.
+                    "data": d.data.decode("utf-8", errors="replace")
+                })
+            
+            if results:
+                logger.info(f"Detected {len(results)} QR/barcodes: {[r['type'] for r in results]}")
+            
+            return results
+        except ImportError:
+            logger.warning("pyzbar not installed, skipping barcode scan")
+            return []
+        except Exception as e:
+            logger.warning(f"Barcode scan failed: {e}")
+            return []
+    
+    def _should_scan_for_codes(self, description: str) -> bool:
+        """
+        Check if VLM description suggests QR/barcode presence.
+        """
+        keywords = ["qr", "barcode", "bar code", "scan code", "qr code", "2d code"]
+        desc_lower = description.lower()
+        return any(kw in desc_lower for kw in keywords)
+    
     async def extract_from_image(
         self,
         image_data: bytes,
@@ -142,10 +191,17 @@ class VisionLLMClient:
             
             logger.info(f"Vision LLM extracted {len(text)} chars from {filename}")
             
+            # Check if VLM detected QR/barcode, then scan it
+            qr_codes = []
+            if self._should_scan_for_codes(description) or self._should_scan_for_codes(text):
+                logger.info(f"VLM detected code reference, scanning image...")
+                qr_codes = self._scan_barcodes(image_data)
+            
             return VisionResult(
                 text=text.strip(),
                 description=description.strip(),
                 confidence=float(confidence),
+                qr_codes=qr_codes,
             )
             
         except httpx.TimeoutException:
@@ -208,8 +264,24 @@ class VisionLLMClient:
                 page = pdf[page_num]
                 
                 # Try to extract text directly from the page
-                textpage = page.get_textpage()
-                page_text = textpage.get_text_bounded().strip()
+                page_text = ""
+                try:
+                    textpage = page.get_textpage()
+                    # Try get_text_bounded first (full page text)
+                    page_text = textpage.get_text_bounded().strip()
+                    
+                    # If that's empty, try get_text_range as fallback
+                    if not page_text:
+                        char_count = textpage.count_chars()
+                        if char_count > 0:
+                            page_text = textpage.get_text_range(0, char_count).strip()
+                            logger.debug(f"Page {page_num + 1}: used get_text_range ({char_count} chars)")
+                    
+                except Exception as text_err:
+                    logger.warning(f"Text extraction failed for page {page_num + 1}: {text_err}")
+                    page_text = ""
+                
+                logger.info(f"Page {page_num + 1}: extracted {len(page_text)} chars via text extraction")
                 
                 if len(page_text) >= min_text_per_page:
                     # Page has enough text, use it directly
@@ -235,11 +307,11 @@ class VisionLLMClient:
             )
             
             # Build results dict for all pages
-            page_results = {}  # page_num -> (text, confidence, source)
+            page_results = {}  # page_num -> (text, confidence, source, qr_codes)
             
             # Add text pages directly
             for page_num, text in text_pages:
-                page_results[page_num] = (text, 1.0, "text_extraction")
+                page_results[page_num] = (text, 1.0, "text_extraction", [])
             
             # Process image pages with Vision LLM
             for page_num, img_data in image_pages:
@@ -253,16 +325,16 @@ class VisionLLMClient:
                     if result.description:
                         page_text = f"{result.text}\n\n[Image Description: {result.description}]"
                     
-                    page_results[page_num] = (page_text, result.confidence, "vision_llm")
+                    page_results[page_num] = (page_text, result.confidence, "vision_llm", result.qr_codes)
                     
                     logger.debug(
                         f"Vision LLM page {page_num}: {len(result.text)} chars, "
-                        f"confidence: {result.confidence:.2f}"
+                        f"confidence: {result.confidence:.2f}, qr_codes: {len(result.qr_codes)}"
                     )
                     
                 except Exception as e:
                     logger.warning(f"Vision LLM failed for page {page_num}: {e}")
-                    page_results[page_num] = ("", 0.0, "vision_llm_error")
+                    page_results[page_num] = ("", 0.0, "vision_llm_error", [])
             
             # Assemble results in page order
             page_texts = []
@@ -271,7 +343,7 @@ class VisionLLMClient:
             vision_pages_count = 0
             
             for page_num in range(1, page_count + 1):
-                text, confidence, source = page_results.get(page_num, ("", 0.0, "missing"))
+                text, confidence, source, qr_codes = page_results.get(page_num, ("", 0.0, "missing", []))
                 page_texts.append(text)
                 total_confidence += confidence
                 
@@ -279,14 +351,17 @@ class VisionLLMClient:
                     vision_pages_count += 1
                 
                 if text.strip():
-                    sections.append({
+                    section_data = {
                         "text": text,
                         "title": f"Page {page_num}",
                         "page_number": page_num,
                         "section_path": f"Page {page_num}",
                         "confidence": confidence,
                         "source": source,
-                    })
+                    }
+                    if qr_codes:
+                        section_data["qr_codes"] = qr_codes
+                    sections.append(section_data)
             
             full_text = "\n\n".join(page_texts)
             avg_confidence = total_confidence / page_count if page_count > 0 else 0.0

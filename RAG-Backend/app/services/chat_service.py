@@ -20,7 +20,8 @@ from app.models.chat import (
     MessageRoleEnum,
     QueryTypeEnum,
 )
-from app.services.retrieval_service import RetrievalService, RetrievedChunk
+from app.services.enhanced_retrieval_service import EnhancedRetrievalService, EnhancedRetrievalResult
+from app.services.memory_service import get_memory_service
 from app.services.llm_client import LLMClient, PromptBuilder
 from app.middleware.error_handler import NotFoundError
 
@@ -35,7 +36,8 @@ class ChatService:
     
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.retrieval = RetrievalService(db)
+        self.retrieval = EnhancedRetrievalService(db)
+        self.memory_service = get_memory_service(db)
         self.llm = LLMClient()
         self.prompt_builder = PromptBuilder()
     
@@ -71,7 +73,7 @@ class ChatService:
             conversation_id=conversation.id,
         )
         
-        # Step 2: Build prompt
+        # Step 2: Build prompt with all RAG context sources
         context_chunks = [
             {
                 "chunk_id": str(rc.chunk.id),
@@ -88,6 +90,9 @@ class ChatService:
             query=query,
             context_chunks=context_chunks,
             conversation_history=history,
+            graph_context=getattr(retrieval_result, 'graph_context', None),
+            memory_context=getattr(retrieval_result, 'memory_context', None),
+            hierarchy_context=getattr(retrieval_result, 'hierarchy_context', None),
         )
         
         # Step 3: Generate response
@@ -192,7 +197,7 @@ class ChatService:
                 conversation_id=conversation.id,
             )
             
-            # Build context
+            # Build context with all RAG sources
             context_chunks = [
                 {
                     "chunk_id": str(rc.chunk.id),
@@ -205,11 +210,14 @@ class ChatService:
                 for rc in retrieval_result.chunks
             ]
             
-            # Build prompt
+            # Build prompt with all RAG context sources
             messages = self.prompt_builder.build_messages(
                 query=query,
                 context_chunks=context_chunks,
                 conversation_history=history,
+                graph_context=getattr(retrieval_result, 'graph_context', None),
+                memory_context=getattr(retrieval_result, 'memory_context', None),
+                hierarchy_context=getattr(retrieval_result, 'hierarchy_context', None),
             )
             
             # Step 2: Stream response
@@ -259,6 +267,23 @@ class ChatService:
             conversation.message_count += 2
             conversation.last_message_at = datetime.utcnow()
             await self.db.commit()
+            
+            # Step 5: Create Memory (Best Effort)
+            try:
+                # Capture the interaction as an episodic memory
+                memory_content = f"User asked: {query}\nAssistant answered: {full_response[:1000]}"
+                await self.memory_service.create_episodic_memory(
+                    user_id=user_id,
+                    event_description=memory_content,
+                    conversation_id=conversation.id,
+                    metadata={
+                        "source": "chat",
+                        "citations_count": len(citations or [])
+                    }
+                )
+                await self.db.commit()
+            except Exception as e:
+                logger.warning(f"Failed to create chat memory: {e}")
             
             # Send done event
             yield {

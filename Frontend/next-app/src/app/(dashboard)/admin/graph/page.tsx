@@ -66,11 +66,12 @@ const TYPE_COLORS: Record<string, string> = {
   EVENT: "#ef4444",
   TECHNOLOGY: "#06b6d4",
   DOCUMENT: "#ec4899",
+  USER: "#6366f1", // Indigo for users
   DEFAULT: "#6b7280",
 };
 
 export default function GraphVisualizationPage() {
-  const { user } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const graphRef = useRef<any>(null);
 
@@ -103,7 +104,7 @@ export default function GraphVisualizationPage() {
       setIsLoading(true);
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8081/v1"
-        }/admin/graph/visualization?limit=100&include_orphans=false`,
+        }/admin/graph/visualization?limit=100&include_orphans=false&include_documents=true&include_users=true`,
         {
           headers: {
             Authorization: `Bearer ${api.getAccessToken()}`,
@@ -112,7 +113,7 @@ export default function GraphVisualizationPage() {
       );
 
       if (!response.ok) {
-        throw new Error("Failed to fetch graph data");
+        throw new Error(`Failed to fetch graph data: ${response.status} ${response.statusText}`);
       }
 
       const data = await response.json();
@@ -189,15 +190,19 @@ export default function GraphVisualizationPage() {
         ],
       });
       setStats({ entities: 5, relationships: 4, communities: 3 });
-      toast.info("Using demo graph data");
+      setStats({ entities: 5, relationships: 4, communities: 3 });
+      toast.error(`Graph Error: ${err instanceof Error ? err.message : String(err)}`);
+      toast.info("Using demo graph data due to error");
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchGraphData();
-  }, [fetchGraphData]);
+    if (!authLoading && user) {
+      fetchGraphData();
+    }
+  }, [fetchGraphData, authLoading, user]);
 
   // Search/highlight nodes
   useEffect(() => {

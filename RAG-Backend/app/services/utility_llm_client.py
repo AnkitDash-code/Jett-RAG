@@ -97,13 +97,13 @@ class UtilityLLMClient:
         
         try:
             # Build context from system prompt
-            context = system_prompt if system_prompt else "You are a helpful assistant for query processing tasks."
-            
+            # Send system prompt as instruction, keep context empty to avoid formatting issues
             response = await client.post(
                 "/generate",
                 json={
                     "query": prompt,
-                    "context": context,
+                    "context": "",  # Empty context for utility tasks
+                    "system_instruction": system_prompt or "You are a helpful assistant for query processing tasks.",
                 }
             )
             response.raise_for_status()
@@ -346,14 +346,22 @@ Return ONLY valid JSON, no other text."""
         
         chunks_text = "\n\n".join(chunk_previews)
         
-        system_prompt = """You are a relevance grader. Given a query and retrieved chunks, 
-evaluate if the chunks are relevant to answering the query.
+        system_prompt = """You are a LENIENT relevance grader. Given a query and retrieved chunks, 
+evaluate if the chunks could be helpful for answering the query.
+
+IMPORTANT: Be GENEROUS about relevance. If a chunk:
+- Contains related topics, entities, or concepts
+- Provides background or context that could be useful
+- Has ANY connection to the query, even indirect
+- Mentions terms that appear in or relate to the query
+
+Then mark it as RELEVANT. Only mark as NOT relevant if the chunk is completely unrelated.
 
 Return a JSON object with:
-- is_relevant: boolean - true if at least one chunk is relevant
+- is_relevant: boolean - true if ANY chunk could help answer the query (default to true)
 - confidence: float 0-1 - how confident you are
-- relevant_indices: list of 1-indexed chunk numbers that are relevant
-- suggestion: string or null - if not relevant, suggest how to rephrase the query
+- relevant_indices: list of 1-indexed chunk numbers that are relevant (include all unless clearly irrelevant)
+- suggestion: string or null - only if NO chunks are relevant, suggest how to rephrase
 
 Return ONLY valid JSON."""
         
@@ -494,32 +502,24 @@ Detailed Summary:"""
             return ". ".join(s.strip() for s in sentences if s.strip()) + "."
         
         system_prompt = (
-            "You are a detailed summarization assistant for background processing. "
-            "Create comprehensive summaries that preserve ALL key information, facts, entities, dates, numbers, and relationships. "
-            "Include specific details - this summary will be used for semantic search later."
+            "You are a concise summarization assistant. "
+            "Create a brief, dense summary of the text. "
+            "Do not repeat information. Do not hallucinate. "
+            "Maximum length: 3 paragraphs."
         )
         
-        prompt = f"""Create a detailed summary that includes ALL important information:
-
-- Main topics, concepts, and themes
-- ALL key facts, figures, dates, and statistics
-- ALL named entities (people, organizations, locations, products)
-- Key relationships and connections
-- Important conclusions, findings, and implications
-- Technical terms and domain-specific vocabulary
-
-Be thorough - preserve every important detail for later retrieval.
+        prompt = f"""Summarize this text concisely:
 
 Text:
 {text[:4000]}
 
-Detailed Summary:"""
+Summary:"""
         
         try:
             response = await self._call_llm(
                 prompt,
                 system_prompt,
-                temperature=0.3,
+                temperature=0.1,
                 max_tokens=max_length
             )
             
@@ -538,9 +538,6 @@ Detailed Summary:"""
     ) -> Dict[str, Any]:
         """
         Detect if current query is a follow-up and resolve references.
-        
-        Returns:
-            Dict with 'is_followup', 'resolved_query', 'referenced_entities'
         """
         if not self.enabled or not previous_messages:
             return {
@@ -625,19 +622,6 @@ Analyze:"""
     ) -> Dict[str, Any]:
         """
         Extract named entities from text for knowledge graph.
-        
-        Args:
-            text: Text to extract entities from
-            entity_types: Optional list of entity types to extract
-                         (PERSON, ORGANIZATION, LOCATION, DATE, EVENT, PRODUCT, TECHNOLOGY, CONCEPT)
-        
-        Returns:
-            Dict with 'entities' list, each containing:
-            - name: entity name
-            - type: entity type
-            - confidence: extraction confidence (0-1)
-            - start_pos: optional start position in text
-            - end_pos: optional end position in text
         """
         if not self.enabled:
             return {"entities": [], "extraction_method": "disabled"}
@@ -650,21 +634,21 @@ Analyze:"""
         if entity_types:
             types_hint = f"\nFocus on these entity types: {', '.join(entity_types)}"
         
-        system_prompt = f"""You are a comprehensive entity extraction system for knowledge graph construction.
-Extract ALL entities thoroughly - this is for background processing where completeness is critical.
+        system_prompt = f"""You are a comprehensive entity extraction system.
+Extract ALL entities thoroughly.
 {types_hint}
 
 Entity types:
-- PERSON: All people, individuals, authors, speakers
-- ORGANIZATION: All companies, institutions, teams, departments
-- LOCATION: All places, addresses, cities, countries, regions
-- DATE: All dates, times, periods, deadlines
-- EVENT: All events, meetings, conferences, milestones
-- PRODUCT: All products, software, tools, services
-- TECHNOLOGY: All technologies, frameworks, languages, platforms
-- CONCEPT: All concepts, theories, methodologies, principles
+- PERSON
+- ORGANIZATION
+- LOCATION
+- DATE
+- EVENT
+- PRODUCT
+- TECHNOLOGY
+- CONCEPT
 
-Extract EVERY entity mentioned, even if minor. Return valid JSON:
+Return valid JSON:
 {{
   "entities": [
     {{"name": "entity name", "type": "ENTITY_TYPE", "confidence": 0.95}}
@@ -723,17 +707,6 @@ Entities:"""
     ) -> Dict[str, Any]:
         """
         Extract relationships between entities in text.
-        
-        Args:
-            text: Original text
-            entities: List of entities already extracted (from extract_entities)
-        
-        Returns:
-            Dict with 'relationships' list, each containing:
-            - source: source entity name
-            - target: target entity name
-            - type: relationship type
-            - confidence: extraction confidence (0-1)
         """
         if not self.enabled or not entities:
             return {"relationships": [], "extraction_method": "disabled"}
@@ -746,19 +719,19 @@ Entities:"""
         max_text_len = 1500
         truncated = text[:max_text_len] if len(text) > max_text_len else text
         
-        system_prompt = """You extract relationships between entities in text.
+        system_prompt = """You extract relationships between entities.
 
-Relationship types to identify:
-- WORKS_FOR: Person works for organization
-- LOCATED_IN: Entity is located in a place
-- RELATED_TO: General relationship
-- PART_OF: Entity is part of another
-- CREATED_BY: Entity was created by another
-- OWNS: Entity owns another
-- MANAGES: Entity manages another
-- MENTIONED_WITH: Entities appear together
+Relationship types:
+- WORKS_FOR
+- LOCATED_IN
+- RELATED_TO
+- PART_OF
+- CREATED_BY
+- OWNS
+- MANAGES
+- MENTIONED_WITH
 
-Return ONLY valid JSON in this format:
+Return ONLY valid JSON:
 {
   "relationships": [
     {"source": "Entity A", "target": "Entity B", "type": "RELATIONSHIP_TYPE", "confidence": 0.9}
@@ -834,27 +807,24 @@ Relationships:"""
         # Truncate text
         max_text_len = 2000
         truncated = text[:max_text_len] if len(text) > max_text_len else text
-        
-        system_prompt = """You are a knowledge extraction assistant. Extract entities and relationships from text.
+
+        system_prompt = """You are a knowledge graph extractor. Extract entities and relationships from the text.
+Return ONLY valid JSON. No markdown formatting. No conversational text.
+
+Refuse to output anything other than this JSON structure:
+{
+  "entities": [{"name": "Name", "type": "TYPE", "confidence": 0.9}],
+  "relationships": [{"source": "Name A", "target": "Name B", "type": "TYPE", "confidence": 0.9}]
+}
 
 Entity types: PERSON, ORGANIZATION, LOCATION, DATE, EVENT, PRODUCT, TECHNOLOGY, CONCEPT
-Relationship types: WORKS_FOR, LOCATED_IN, RELATED_TO, PART_OF, CREATED_BY, OWNS, MANAGES, MENTIONED_WITH
-
-Return ONLY valid JSON in this exact format:
-{
-  "entities": [
-    {"name": "Entity Name", "type": "ENTITY_TYPE", "confidence": 0.95}
-  ],
-  "relationships": [
-    {"source": "Entity A", "target": "Entity B", "type": "RELATIONSHIP_TYPE", "confidence": 0.9}
-  ]
-}"""
+Relationship types: WORKS_FOR, LOCATED_IN, RELATED_TO, PART_OF, CREATED_BY, OWNS, MANAGES, MENTIONED_WITH"""
         
-        prompt = f"""Extract all entities and relationships from this text:
+        prompt = f"""Extract entities and relationships from:
 
 {truncated}
 
-Extraction:"""
+JSON Output:"""
         
         try:
             response = await self._call_llm(prompt, system_prompt, temperature=0.1)
